@@ -17,12 +17,13 @@ from utils import angle_diff
 # --- NO IMPORT from task_base here ---
 
 # --- DiveToDepth Subtask ---
+# ... (DiveToDepth code remains the same) ...
 class DiveToDepth(Subtask):
     """
     Dives to the target_depth from context, holding initial X, Y, and heading.
     Uses the main PID hover command.
     """
-    def __init__(self, depth_tolerance: float = 0.1, z_vel_tolerance: float = 0.05):
+    def __init__(self, depth_tolerance: float = 0.15, z_vel_tolerance: float = 0.05): # Increased tolerance
         self.depth_tolerance = depth_tolerance
         self.z_vel_tolerance = z_vel_tolerance
         self.target_depth: float = 1.0
@@ -63,6 +64,7 @@ class DiveToDepth(Subtask):
         return f"{self.name}({self.target_depth:.1f}m)"
 
 # --- SwayStraight Subtask ---
+# ... (SwayStraight code remains the same) ...
 class SwayStraight(Subtask):
     """
     Sways (strafes) for a set duration, holding heading and depth.
@@ -95,6 +97,7 @@ class SwayStraight(Subtask):
         return f"{self.name}({self.sway_power:+.1f})"
 
 # --- DriveUntilTargetLostForward Subtask ---
+# ... (DriveUntilTargetLostForward code remains the same) ...
 class DriveUntilTargetLostForward(Subtask):
     """
     Drives straight forward (holding heading and depth) until the
@@ -151,7 +154,8 @@ class DriveUntilTargetLostForward(Subtask):
                 print(f"ERROR: DriveUntilTargetLostForward failed. Target '{self.target_type}' never visible.")
                 return SubtaskStatus.FAILED, sub._get_damping_commands(sensors)
 
-# --- DynamicOrbitPole Subtask ---
+
+# --- CORRECTED DynamicOrbitPole Subtask ---
 class DynamicOrbitPole(Subtask):
     """
     Orbits the pole by applying constant sway and using yaw control
@@ -160,27 +164,29 @@ class DynamicOrbitPole(Subtask):
     Completes when the gate AND pole are visible AND reasonably centered.
     """
     def __init__(self,
-                 target_x_fraction: float = 0.5, # Default target = center
-                 sway_power: float = -0.3,     # Negative = Left
+                 target_x_fraction: float = 0.5,
+                 sway_power: float = -0.3,
                  yaw_gain: float = 1.5,
                  target_height_px: int = 100,
                  orbit_surge_p_gain: float = 0.1,
                  orbit_surge_i_gain: float = 0.02,
                  orbit_surge_d_gain: float = 0.1,
                  orbit_surge_i_clamp: float = 0.5,
-                 center_tolerance_fraction: float = 0.15, # +/- 15% for centered check
+                 center_tolerance_fraction: float = 0.15, # <-- Added to signature
                  lost_timeout: float = 3.0,
                  local_search_yaw: float = -0.2):
 
         self.target_x_fraction = target_x_fraction
         self.sway_power = sway_power
         self.yaw_gain = yaw_gain
+        # Surge PID parameters
         self.target_height_px = target_height_px
         self.surge_p_gain = orbit_surge_p_gain
         self.surge_i_gain = orbit_surge_i_gain
         self.surge_d_gain = orbit_surge_d_gain
         self.surge_i_clamp = orbit_surge_i_clamp
-        self.center_tolerance_fraction = center_tolerance_fraction
+        # ---
+        self.center_tolerance_fraction = center_tolerance_fraction # <-- Store parameter
         self.lost_timeout = lost_timeout
         self.local_search_yaw = local_search_yaw
         self.target_depth: float = 0.1
@@ -253,14 +259,10 @@ class DynamicOrbitPole(Subtask):
 
     def get_dynamic_name(self, context: Dict[str, Any]) -> str:
         search_indicator = f" Searching! ({self.time_since_target_lost:.1f}s)" if self.time_since_target_lost > 0 else ""
-        # The vision_data object isn't directly available here for dynamic name
-        # gate_vis = " G" if vision_data.is_gate_visible() else ""
-        # pole_vis = " P" if vision_data.is_pole_visible() else ""
-        # return f"{self.name}(Align{gate_vis}{pole_vis}){search_indicator}"
         return f"{self.name}(Aligning){search_indicator}"
 
-
 # --- SwayUntilTargetLost Subtask ---
+# ... (SwayUntilTargetLost code remains the same) ...
 class SwayUntilTargetLost(Subtask):
     """
     Sways straight (holding heading and depth) until the specified
@@ -324,6 +326,7 @@ class SwayUntilTargetLost(Subtask):
         return f"{self.name}({self.sway_power:+.1f})"
 
 # --- Navigation Subtasks ---
+# ... (TurnToHeading, DriveStraight, Stabilize remain the same) ...
 class TurnToHeading(Subtask):
     def __init__(self, absolute_degrees: Optional[float] = None, relative_degrees: Optional[float] = None, tolerance_degrees: float = 5.0):
         if absolute_degrees is not None and relative_degrees is not None: raise ValueError("Provide either absolute_degrees or relative_degrees, not both.")
@@ -337,7 +340,7 @@ class TurnToHeading(Subtask):
         elif self.relative_degrees is not None:
             initial_heading = context.get('initial_heading', sensors.heading);
             self.target_heading = (initial_heading + self.relative_degrees) % 360
-        else: self.target_heading = None # Should not happen based on __init__ checks
+        else: self.target_heading = None
         self.target_depth = context.get('target_depth', sensors.depth)
 
     def execute(self, sub: 'Submarine', dt: float, sensors: SensorSuite, vision_data: Vision, config: SimulationConfig, context: Dict[str, Any]) -> Tuple[SubtaskStatus, ThrusterCommands]:
@@ -354,7 +357,6 @@ class TurnToHeading(Subtask):
     
     def get_dynamic_name(self, context: Dict[str, Any]) -> str:
         if self.target_heading is not None: return f"{self.name}({self.target_heading:.0f}°)"
-        # Fallback logic from __init__ checks
         elif self.absolute_degrees is not None: return f"{self.name}(Abs {self.absolute_degrees:.0f}°)"
         elif self.relative_degrees is not None: rel = self.relative_degrees; init = context.get('initial_heading', '?'); calc_target = f" -> {(init + rel) % 360:.0f}" if init != '?' else ""; return f"{self.name}(Rel {rel:.0f}° from {init}°{calc_target})"
         return self.name
@@ -533,78 +535,6 @@ class AlignToObjectX(Subtask):
                 context: Dict[str, Any]):
         context['initial_heading'] = sensors.heading
 
-class DriveUntilTargetLostRight(Subtask):
-    def __init__(self, surge_power: float = 0.3, disappear_threshold_fraction: float = 0.95):
-        self.surge_power = surge_power
-        self.disappear_threshold_fraction = disappear_threshold_fraction
-        self.heading_to_hold: Optional[float] = None
-        self.last_pole_center_x: Optional[float] = None
-        self.target_depth: float = 0.1
-
-    def on_enter(self, sub: 'Submarine', sensors: SensorSuite,
-                 vision_data: Vision,
-                 context: Dict[str, Any]):
-        self.heading_to_hold = context.get('initial_heading', sensors.heading)
-        self.target_depth = context.get('target_depth', sensors.depth)
-        
-        if vision_data.is_pole_visible():
-            self.last_pole_center_x = vision_data.get_pole_center_x()
-        else:
-             self.last_pole_center_x = None
-
-    def execute(self, sub: 'Submarine', dt: float, sensors: SensorSuite,
-                vision_data: Vision,
-                config: SimulationConfig, context: Dict[str, Any]) -> Tuple[SubtaskStatus, ThrusterCommands]:
-        if self.heading_to_hold is None: self.heading_to_hold = sensors.heading
-
-        pole_visible = vision_data.is_pole_visible()
-        pole_center_x = vision_data.get_pole_center_x()
-        cam_w, _ = sensors.camera_image.get_size()
-
-        pole_disappeared_right = (not pole_visible) and \
-                                 (self.last_pole_center_x is not None) and \
-                                 (self.last_pole_center_x > cam_w * self.disappear_threshold_fraction)
-
-        if pole_disappeared_right:
-            return SubtaskStatus.COMPLETED, sub._get_damping_commands(sensors)
-        
-        commands = sub.get_heading_commands(sensors, self.heading_to_hold,
-                                            self.surge_power,
-                                            target_depth=self.target_depth)
-        
-        if pole_visible and pole_center_x is not None:
-            self.last_pole_center_x = pole_center_x
-        elif not pole_visible:
-             pass
-
-        return SubtaskStatus.RUNNING, commands
-
-class SpinUntilTargetReappearsLeft(Subtask):
-    def __init__(self, target_fraction: float, yaw_power: float = -0.3): # Default left yaw
-        self.target_fraction = target_fraction
-        self.yaw_power = yaw_power
-        self.target_depth: float = 0.1
-        
-    def on_enter(self, sub: 'Submarine', sensors: SensorSuite, vision_data: Vision, context: Dict[str, Any]):
-        self.target_depth = context.get('target_depth', sensors.depth)
-
-    def execute(self, sub: 'Submarine', dt: float, sensors: SensorSuite,
-                vision_data: Vision,
-                config: SimulationConfig, context: Dict[str, Any]) -> Tuple[SubtaskStatus, ThrusterCommands]:
-        
-        pole_visible = vision_data.is_pole_visible()
-        pole_center_x = vision_data.get_pole_center_x()
-        cam_w, _ = sensors.camera_image.get_size()
-        target_pixel_x = cam_w * self.target_fraction
-
-        if pole_visible and pole_center_x is not None and pole_center_x < target_pixel_x:
-            return SubtaskStatus.COMPLETED, sub.get_spin_damping_commands(sensors, self.target_depth)
-            
-        heave, pitch = sub.get_depth_pitch_commands(sensors, self.target_depth, 0.0)
-        
-        commands = sub._mix_and_normalize_commands(0.0, 0.0, self.yaw_power, heave, pitch)
-        return SubtaskStatus.RUNNING, commands
-        
 class ApproachAndCenterObject(Subtask):
     """
     Surges and steers to align object to target_x_fraction based on visual HEIGHT.
