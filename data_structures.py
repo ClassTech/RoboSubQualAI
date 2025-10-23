@@ -4,14 +4,14 @@ Defines simple data classes used for passing information between modules,
 including the Vision class which holds an image provider and analyzes on demand.
 """
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Tuple, Any, Callable # Added Callable
+from typing import List, Optional, Dict, Tuple, Any, Callable 
 import pygame
 import numpy as np 
 # --- Import the blob finding function ---
 from ai.vision import find_blobs_hsv
 # ---
 # --- Import HSV Ranges (needed for thresholds potentially) ---
-from config import GREEN_HSV_RANGE, RED_HSV_RANGES, SimulationConfig # Added SimConfig if needed later
+from config import GREEN_HSV_RANGE, RED_HSV_RANGES, SimulationConfig 
 # ---
 
 @dataclass
@@ -19,7 +19,8 @@ class MPU6050Readings:
     accel_x: float = 0.0
     accel_y: float = 0.0
     accel_z: float = 0.0
-    gyro_z: float = 0.0
+    gyro_y: float = 0.0  # Pitch rate
+    gyro_z: float = 0.0  # Yaw rate
 
 @dataclass
 class SensorSuite:
@@ -32,7 +33,7 @@ class SensorSuite:
     y: float = 0.0
     velocity_x: float = 0.0
     velocity_y: float = 0.0
-    angular_velocity_y: float = 0.0
+    angular_velocity_y: float = 0.0 # Pitch rate (rad/s)
     velocity_z: float = 0.0
 
 # --- UPDATED Vision Class ---
@@ -134,9 +135,17 @@ class Vision:
     def get_gate_center_x(self) -> Optional[float]:
         pair = self.get_gate_pair(); return (pair[0]['center_x'] + pair[1]['center_x']) / 2 if pair else None
 
-# Simplified ThrusterCommands (remains the same)
+# --- UPDATED ThrusterCommands ---
 @dataclass
 class ThrusterCommands:
-    port: float = 0.0
-    starboard: float = 0.0
+    # Horizontal Vectored Thrusters (4 corners)
+    hfl: float = 0.0  # Horizontal Front-Left
+    hfr: float = 0.0  # Horizontal Front-Right
+    hal: float = 0.0  # Horizontal Aft-Left
+    har: float = 0.0  # Horizontal Aft-Right
+
+    # Vertical Thrusters (front and rear)
+    vf: float = 0.0   # Vertical Front
+    vr: float = 0.0   # Vertical Rear
+    
     pause_simulation: bool = False

@@ -3,6 +3,7 @@
 Implements a "Ratchet Turn" task using subtasks.
 Aligns initially, surges past, yaws back, aligns subsequently, loops.
 Completes when the gate is seen. Loop logic handled within the task.
+Now holds target_depth.
 """
 import math
 from typing import Tuple, Dict, Any
@@ -20,22 +21,21 @@ from ai.tasks.common_subtasks import (WaitForTargetVisible, AlignToObjectX,
 from data_structures import SensorSuite, Vision, ThrusterCommands 
 # ---
 from config import SimulationConfig # Keep config for subtask calls
-# Vision processing functions no longer needed here
-# from ai.vision import find_blobs_hsv 
-# from config import GREEN_HSV_RANGE, RED_HSV_RANGES 
 from utils import angle_diff
 
 class RatchetTurnTask(Task):
     """
     Navigates around the pole using subtasks for align-surge-yaw-repeat
-    until the red gate is detected. Loop logic handled in execute.
+    until the red gate is detected. Holds target_depth.
     """
     def __init__(self, 
+                 target_depth: float = 1.0, # <-- ADDED
                  initial_target_fraction=0.6, 
                  subsequent_target_fraction=0.8, 
                  surge_power=0.3, 
                  yaw_power=-0.3): 
         
+        self.target_depth = target_depth # <-- ADDED
         self.initial_target_fraction = initial_target_fraction
         self.subsequent_target_fraction = subsequent_target_fraction
         self.surge_power = surge_power
@@ -50,6 +50,7 @@ class RatchetTurnTask(Task):
 
         self.loop_start_index = 2 
         self.subtasks = [
+            # WaitForTargetVisible will default to 'either', which is fine
             WaitForTargetVisible(), 
             AlignToObjectX(target_x_fraction=self.initial_target_fraction, 
                            tolerance_px=align_tolerance_px, 
@@ -64,25 +65,26 @@ class RatchetTurnTask(Task):
                            yaw_gain=align_yaw_gain, 
                            yaw_rate_tolerance=align_yaw_rate_tolerance), 
         ]
-
-        # No local vision data storage needed anymore
-        # self.pole_vision_data = Vision() 
-        # self.gate_vision_data = Vision()
-
         self.reset() 
+
+    def reset(self, search_direction: int = 1):
+        """Resets the task and adds target_depth to the context."""
+        super().reset(search_direction)
+        # --- ADD target_depth to context for subtasks ---
+        self.context['target_depth'] = self.target_depth
+        # ---
 
     # --- process_vision method is REMOVED ---
 
     # Override execute to add the gate completion check AND loop logic
     def execute(self, sub: 'Submarine', dt: float, sensors: SensorSuite, 
-                # --- vision_data argument type hint changed ---
                 vision_data: Vision, 
-                # ---
                 config: SimulationConfig) -> Tuple[TaskStatus, ThrusterCommands]:
         
         index_before_execute = self.current_subtask_index
         
-        # Base class calls subtask execute, passing the updated vision_data object.
+        # Base class calls subtask execute, passing the updated vision_data object
+        # Subtasks will use target_depth from context to hold depth
         status, commands = super().execute(sub, dt, sensors, vision_data, config) 
         
         # --- Check gate visibility using the passed vision_data object ---
@@ -96,8 +98,7 @@ class RatchetTurnTask(Task):
             self.current_subtask_index = self.loop_start_index
             if self.subtasks and 0 <= self.current_subtask_index < len(self.subtasks):
                 next_subtask = self.subtasks[self.current_subtask_index]
-                # Re-create vision object? No, the Submarine object's instance is updated.
-                # Just pass the existing, updated vision_data object to on_enter.
+                # Re-enter the loop start subtask
                 next_subtask.on_enter(sub, sensors, vision_data, self.context)
                 next_subtask._has_entered = True 
             return TaskStatus.RUNNING, ThrusterCommands() 

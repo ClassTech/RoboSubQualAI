@@ -6,37 +6,50 @@ Assembles and starts the simulation.
 from simulator import SubmarineSimulator
 from ai.submarine import Submarine
 # --- Absolute imports from ai.tasks package ---
-# --- MODIFY IMPORTS ---
-from ai.tasks import GateTask, StabilizeTask, RatchetTurnTask # Was MarkerTurnTask
+from ai.tasks import GateTask, StabilizeTask, OrbitTurnTask
 # ---
 
 if __name__ == "__main__":
-    MISSION_DEPTH = 0.1 # Run on the surface
+    # --- SET MISSION DEPTH ---
+    MISSION_DEPTH = 1.5 # Run 1.5m deep
+    SURFACE_DEPTH = 0.1 # Just under the surface
+    # ---
 
-    # --- Create task instances ---
+    # --- Create task instances, passing target_depth ---
     first_gate_task = GateTask(target_depth=MISSION_DEPTH)
-    stabilize_after_gate1 = StabilizeTask(duration=2.0)
-    ratchet_task = RatchetTurnTask(initial_target_fraction=0.6, 
-                                   subsequent_target_fraction=0.95, 
-                                   surge_power=0.25, 
-                                   yaw_power=-0.3) 
-    stabilize_after_turn = StabilizeTask(duration=2.0)
+    stabilize_after_gate1 = StabilizeTask(duration=2.0, target_depth=MISSION_DEPTH)
+
+    # --- USE NEW ORBIT TASK ---
+    # --- REMOVED initial_align_fraction argument ---
+    orbit_task = OrbitTurnTask(target_depth=MISSION_DEPTH,
+                               approach_height_px=180,
+                               orbit_target_fraction=0.5,
+                               orbit_sway_power=-0.1,      # Negative = Left for orbit
+                               orbit_yaw_gain=2.5,
+                               orbit_target_height_px=180,
+                               final_sway_power=-0.3)      
+    # ---
+
+    stabilize_after_turn = StabilizeTask(duration=2.0, target_depth=MISSION_DEPTH)
     return_gate_task = GateTask(target_depth=MISSION_DEPTH)
 
-    # --- Set initial search direction for RatchetTurnTask ---
-    ratchet_task.search_direction = -1 # Initial search right for pole
+    stabilize_before_surface = StabilizeTask(duration=2.0, target_depth=MISSION_DEPTH)
+    surface_task = StabilizeTask(duration=10.0, target_depth=SURFACE_DEPTH)
+    # ---
 
     # --- Set search direction for the return GateTask ---
-    return_gate_task.search_direction = -1 # Search right for gate after turn
+    return_gate_task.search_direction = -1
     # ---
 
     # --- Define mission plan using the instances ---
     mission = [
         first_gate_task,
         stabilize_after_gate1,
-        ratchet_task,
+        orbit_task,
         stabilize_after_turn,
-        return_gate_task 
+        return_gate_task,
+        stabilize_before_surface,
+        surface_task
     ]
 
     submarine_ai = Submarine(mission_plan=mission)

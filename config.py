@@ -36,6 +36,29 @@ class SimulationConfig:
     submarineWidth: float = 0.46
     submarineLength: float = 0.457
 
+    # --- NEW 3D Physics Properties ---
+    subMass: float = 4.0        # Mass (kg) 
+    subInertia_Z: float = 0.35  # Rotational Inertia (Yaw)
+    subInertia_Y: float = 0.35  # Rotational Inertia (Pitch) - ASSUMED, TUNE ME
+    
+    thrusterMaxForce: float = 0.8 # Max force per thruster (N)
+    
+    # Drag Coefficients (TUNE THESE)
+    surgeDragCoeff: float = 1.5   # Forward/backward 
+    swayDragCoeff: float = 8.0    # Side-to-side
+    heaveDragCoeff: float = 8.0   # Up/down (Assumed same as sway)
+    
+    angularDragCoeff_Z: float = 0.25 # Yaw drag
+    angularDragCoeff_Y: float = 0.25 # Pitch drag (Assumed same as yaw)
+    
+    # Buoyancy
+    gravity: float = 9.81
+    # --- MODIFIED: 0.0039 -> 0.0041 for ~1N positive buoyancy ---
+    subVolume: float = 0.0041 # (m^3) e.g., 4.1L
+    # ---
+    waterDensity: float = 1000.0 # (kg/m^3)
+    # ---
+
 # --- Pre-Qualification Course Configuration ---
 @dataclass
 class PrequalConfig:
@@ -54,7 +77,7 @@ class PrequalConfig:
     MARKER_X_POS: float = GATE_X_POS + 10.0 # 33 ft beyond
     
     # 4. Starting Position
-    START_X_POS: float = 3.0
+    START_X_POS: float = 7.0 # 3m behind gate
     START_Z_POS: float = 0.1 # Start on the surface
     
     # 5. Pole Extension

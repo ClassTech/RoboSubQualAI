@@ -3,14 +3,14 @@
 Base class for reusable sub-actions within a larger Task.
 """
 from enum import Enum, auto
-from typing import Tuple, Dict, Any # Added Dict, Any
+from typing import Tuple, Dict, Any
 
 # --- Ensure this line correctly imports Vision ---
 from data_structures import SensorSuite, Vision, ThrusterCommands
 # ---
 from config import SimulationConfig
-# Forward declaration
-class Submarine: pass
+# Forward declaration no longer needed
+# class Submarine: pass
 
 class SubtaskStatus(Enum):
     RUNNING = auto()
@@ -19,7 +19,7 @@ class SubtaskStatus(Enum):
 
 class Subtask:
     """Base class for a reusable action within a larger Task."""
-    # --- Ensure type hints use Vision ---
+    # --- Ensure type hints use Vision and 'Submarine' ---
     def on_enter(self, sub: 'Submarine', sensors: SensorSuite, vision_data: Vision, context: Dict[str, Any]):
         pass
 
