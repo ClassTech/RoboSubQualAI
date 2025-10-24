@@ -8,15 +8,17 @@ from .subtask_base import Subtask, SubtaskStatus
 from .task_base import Task, TaskStatus
 
 # Import Common Subtasks needed by other tasks
-# (Removed unused imports)
+# --- Removed DriveUntilTargetLostRight ---
 from .common_subtasks import (
-    DiveToDepth, DynamicOrbitPole, TurnToHeading, DriveStraight, Stabilize,
-    DriveUntilTargetLost, WaitForTargetVisible, AlignToObjectX,
+    DiveToDepth, SwayStraight, DriveUntilTargetLostForward, DynamicOrbitPole,
+    TurnToHeading, DriveStraight, Stabilize, DriveUntilTargetLost,
+    WaitForTargetVisible, AlignToObjectX,
     ApproachAndCenterObject, SwayUntilTargetLost
 )
+# ---
 
 # Import Specific Task Implementations LAST
 from .gate_task import GateTask
 from .stabilize_task import StabilizeTask
 from .orbit_turn_task import OrbitTurnTask
-# Removed MarkerTurnTask, RatchetTurnTask
+from .shutdown_task import ShutdownTask

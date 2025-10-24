@@ -31,10 +31,10 @@ class OrbitTurnTask(Task):
                  target_depth: float = 1.0,
                  approach_height_px: int = 180,
                  orbit_target_fraction: float = 0.5,
-                 orbit_sway_power: float = -0.1,     # Negative = Left for orbit
-                 orbit_yaw_gain: float = 2.5,
+                 orbit_sway_power: float = -0.5,     # Negative = Left for orbit
+                 orbit_yaw_gain: float = 4.5,
                  orbit_target_height_px: int = 180,
-                 final_sway_power: float = -0.3):    # Sway power for final move
+                 final_sway_power: float = -0.5):    # Sway power for final move
 
         self.target_depth = target_depth
 

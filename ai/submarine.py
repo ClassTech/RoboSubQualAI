@@ -71,40 +71,63 @@ class Submarine:
         self.integral_z_err = 0.0 
         self._latest_sensors = None 
 
-    def update(self, dt: float, sensors: SensorSuite) -> Tuple[ThrusterCommands, Vision]: 
-        
+    def update(self, dt: float, sensors: SensorSuite) -> Tuple[ThrusterCommands, Vision]:
+
         self._latest_sensors = sensors
 
+        # --- MODIFIED: Check for mission completion FIRST ---
         if self.current_task_index >= len(self.mission_plan):
-            cmds = self._get_damping_commands(sensors)
-            return cmds, self.vision 
+            # Mission is fully complete. Return ZERO commands.
+            return ThrusterCommands(), self.vision
+        # ---
 
         current_task = self.mission_plan[self.current_task_index]
         self.target_depth = getattr(current_task, 'target_depth', self.target_depth)
         self.vision.update()
-        
-        # --- UPDATE INTEGRAL TERMS ---
+
         depth_error = self.target_depth - sensors.depth
         self.integral_z_err = np.clip(self.integral_z_err + depth_error * dt, -self.integral_clamp_z, self.integral_clamp_z)
-        # ---
 
         status, commands = current_task.execute(self, dt, sensors, self.vision, self.config)
 
         # --- Task Transition Logic ---
-        if status == TaskStatus.COMPLETED and self.current_task_index < len(self.mission_plan) - 1:
-            
-            self.current_task_index += 1
-            next_task = self.mission_plan[self.current_task_index]
-            
-            self.target_depth = getattr(next_task, 'target_depth', self.target_depth)
-            
-            # Reset integrals before tasks that need precise stabilization
-            if hasattr(next_task, 'SPEED_THRESHOLD') or next_task.__class__.__name__ == 'DiveToDepth': 
-                 print(f"INFO: Resetting PID integrals for task: {next_task.__class__.__name__}")
-                 self.integral_x_err, self.integral_y_err, self.integral_z_err = 0.0, 0.0, 0.0
-            if hasattr(next_task, 'on_start'): # Should use on_enter
-                next_task.on_start(self, sensors) 
+        # --- MODIFIED: Allow transition even for the last task ---
+        if status == TaskStatus.COMPLETED:
+            # Check if it was the *very last* task completing
+            if self.current_task_index >= len(self.mission_plan) - 1:
+                print("INFO: Final mission task completed.")
+                self.current_task_index += 1 # Increment index past the end
+                # Return the final commands from the completed task (e.g., zero from Shutdown)
+                return commands, self.vision
+            else:
+                # Standard transition to the next task
+                self.current_task_index += 1
+                next_task = self.mission_plan[self.current_task_index]
+                self.target_depth = getattr(next_task, 'target_depth', self.target_depth)
+                if hasattr(next_task, 'SPEED_THRESHOLD') or next_task.__class__.__name__ == 'DiveToDepth':
+                    print(f"INFO: Resetting PID integrals for task: {next_task.__class__.__name__}")
+                    self.integral_x_err, self.integral_y_err, self.integral_z_err = 0.0, 0.0, 0.0
+                # Call on_enter for the next task if it exists (using correct method name)
+                if hasattr(next_task, 'on_enter'):
+                     # Need vision data for on_enter - re-get? No, use current frame's
+                     next_task.on_enter(self, sensors, self.vision, next_task.context)
+                     # Set _has_entered manually since base execute won't run yet
+                     if hasattr(next_task, 'subtasks') and next_task.subtasks:
+                         if next_task.current_subtask_index < len(next_task.subtasks):
+                              next_task.subtasks[next_task.current_subtask_index]._has_entered = True
 
+
+                # Return zero commands during the transition frame
+                return ThrusterCommands(), self.vision
+        # --- END MODIFIED TRANSITION ---
+        elif status == TaskStatus.FAILED:
+            print(f"ERROR: Task {current_task.__class__.__name__} FAILED. Stopping.")
+            # Optionally, implement a failure state or stop simulation
+            # For now, just damp and effectively end mission by incrementing index
+            self.current_task_index = len(self.mission_plan) # Move index past end
+            return self._get_damping_commands(sensors), self.vision
+
+        # Task still running
         return commands, self.vision
     
     # --- ADDED METHODS BACK ---

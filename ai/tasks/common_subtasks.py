@@ -168,9 +168,9 @@ class DynamicOrbitPole(Subtask):
                  sway_power: float = -0.3,
                  yaw_gain: float = 1.5,
                  target_height_px: int = 100,
-                 orbit_surge_p_gain: float = 0.1,
-                 orbit_surge_i_gain: float = 0.02,
-                 orbit_surge_d_gain: float = 0.1,
+                 orbit_surge_p_gain: float = 1.0,  # Was 0.1. Increased P significantly.
+                 orbit_surge_i_gain: float = 0.2, # Was 0.02. Increased I slightly.
+                 orbit_surge_d_gain: float = 0.2,  # Was 0.1. Significantly increased D.
                  orbit_surge_i_clamp: float = 0.5,
                  center_tolerance_fraction: float = 0.15, # <-- Added to signature
                  lost_timeout: float = 3.0,

@@ -156,7 +156,7 @@ class SubmarineSimulator:
         fx = f_x_pitched * cos_h - total_force_sway * sin_h
         fy = f_x_pitched * sin_h + total_force_sway * cos_h
         
-        fz = f_z_pitched + self.netBuoyancyForce 
+        fz = f_z_pitched - self.netBuoyancyForce 
 
         ax = fx / self.subMass
         ay = fy / self.subMass
