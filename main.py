@@ -26,7 +26,7 @@ if __name__ == "__main__":
                                orbit_target_fraction=0.5,
                                orbit_sway_power=-0.5,      # Negative = Left for orbit
                                orbit_yaw_gain=4.5,
-                               orbit_target_height_px=180,
+                               orbit_target_width_px=40,
                                final_sway_power=-0.5)      
     # ---
 
