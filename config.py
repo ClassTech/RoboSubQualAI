@@ -61,6 +61,21 @@ class SimulationConfig:
     waterDensity: float = 1000.0 # (kg/m^3)
     # ---
 
+# --- Sensor Noise (all ASSUMED, TUNE ME against the real sensors) ---
+# Per-episode values are drawn uniformly from (min, max) ranges at reset.
+@dataclass
+class SensorNoiseConfig:
+    depthNoiseStd: float = 0.003            # Pressure sensor depth noise (m)
+    depthOffsetRange: Tuple[float, float] = (-0.02, 0.02)   # Zero-point error (m)
+    depthFilterAlpha: float = 0.3           # Alpha-beta filter gains for depth rate
+    depthFilterBeta: float = 0.03           # (~0.3 s to track a step in speed)
+    headingNoiseStd: float = 0.5            # Magnetometer heading noise (deg)
+    headingOffsetRange: Tuple[float, float] = (-15.0, 15.0) # Pool steel distortion (deg)
+    pitchNoiseStd: float = 0.2              # IMU pitch noise (deg)
+    gyroNoiseStd: float = 0.005             # Gyro noise (rad/s)
+    gyroBiasRange: Tuple[float, float] = (-0.005, 0.005)    # Gyro bias (rad/s)
+    accelNoiseStd: float = 0.05             # Accelerometer noise (m/s^2)
+
 # --- Pre-Qualification Course Configuration ---
 @dataclass
 class PrequalConfig:

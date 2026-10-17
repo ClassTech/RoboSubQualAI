@@ -39,7 +39,7 @@ class DiveToDepth(Subtask):
     def execute(self, sub: 'Submarine', dt: float, sensors: SensorSuite, vision_data: Vision, config: SimulationConfig, context: Dict[str, Any]) -> Tuple[SubtaskStatus, ThrusterCommands]:
         if not self.target_set: self.on_enter(sub, sensors, vision_data, context)
         depth_error = self.target_depth - sensors.depth
-        if (abs(depth_error) < self.depth_tolerance and abs(sensors.velocity_z) < self.z_vel_tolerance):
+        if (abs(depth_error) < self.depth_tolerance and abs(sensors.depth_rate) < self.z_vel_tolerance):
             print("INFO: DiveToDepth complete."); return SubtaskStatus.COMPLETED, sub._get_damping_commands(sensors)
         commands = sub._get_pid_hover_commands(sensors, dt, self.target_x, self.target_y, self.target_depth)
         return SubtaskStatus.RUNNING, commands
@@ -347,7 +347,7 @@ class Stabilize(Subtask):
     def execute(self, sub: 'Submarine', dt: float, sensors: SensorSuite, vision_data: Vision, config: SimulationConfig, context: Dict[str, Any]) -> Tuple[SubtaskStatus, ThrusterCommands]:
         if not self.target_set: self.on_enter(sub, sensors, vision_data, context)
         self.timer += dt
-        speed_xy = math.hypot(sensors.velocity_x, sensors.velocity_y); speed_z = abs(sensors.velocity_z)
+        speed_xy = math.hypot(sensors.velocity_x, sensors.velocity_y); speed_z = abs(sensors.depth_rate)
         if self.timer > self.duration and speed_xy < self.speed_threshold and speed_z < self.speed_threshold: return SubtaskStatus.COMPLETED, sub._get_damping_commands(sensors)
         commands = sub._get_pid_hover_commands(sensors, dt, sub.target_x, sub.target_y, sub.target_depth)
         return SubtaskStatus.RUNNING, commands

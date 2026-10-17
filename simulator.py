@@ -19,6 +19,7 @@ from data_structures import ThrusterCommands, MPU6050Readings, SensorSuite, Visi
 # ---
 from ai.submarine import Submarine
 from collision import build_obstacles, find_collision, check_gate_crossing
+from sensor_model import SensorModel
 
 
 class SubmarineSimulator:
@@ -57,6 +58,7 @@ class SubmarineSimulator:
         self.yawLeverArm = 0.7071 * (self.config.submarineLength / 2 + self.config.submarineWidth / 2)
         self.poleBottomZ = self.config.worldDepth - 0.01
 
+        self.sensorModel = SensorModel()
         self.submarineAI = submarine_ai
         self.prequal_gate: Optional[PrequalGate] = None
         self.prequal_marker: Optional[PrequalMarker] = None
@@ -88,6 +90,7 @@ class SubmarineSimulator:
             z = start_depth,
             heading = start_heading, pitch = 0.0
         )
+        self.sensorModel.reset()
         self.submarineAI.reset()
         self.startTime = time.time()
         self.running, self.paused = True, False
@@ -331,9 +334,11 @@ class SubmarineSimulator:
                  self.render()
                  continue
              self.generateCameraView()
-             sensors = SensorSuite(camera_image=self.cameraSurface, depth=self.subPhysics.z,
-                                   heading=self.subPhysics.heading, pitch=self.subPhysics.pitch,
-                                   imu=self.last_imu_readings, x=self.subPhysics.x, y=self.subPhysics.y,
+             measured = self.sensorModel.read(self.subPhysics, self.last_imu_readings, dt)
+             sensors = SensorSuite(camera_image=self.cameraSurface, depth=measured.depth,
+                                   heading=measured.heading, pitch=measured.pitch,
+                                   imu=measured.imu, depth_rate=measured.depth_rate,
+                                   x=self.subPhysics.x, y=self.subPhysics.y,
                                    velocity_x=self.subPhysics.velocity_x, velocity_y=self.subPhysics.velocity_y,
                                    angular_velocity_y=self.subPhysics.angular_velocity_y,
                                    velocity_z=self.subPhysics.velocity_z)

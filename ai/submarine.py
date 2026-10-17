@@ -159,7 +159,7 @@ class Submarine:
         
         heave_p = depth_error * self.DEPTH_P_GAIN
         heave_i = self.integral_z_err * self.DEPTH_I_GAIN 
-        heave_d = -sensors.velocity_z * self.DEPTH_D_GAIN
+        heave_d = -sensors.depth_rate * self.DEPTH_D_GAIN
         heave_cmd = np.clip(heave_p + heave_i + heave_d, -1.0, 1.0)
         
         pitch_error = angle_diff(target_pitch, sensors.pitch)
@@ -170,7 +170,8 @@ class Submarine:
         return heave_cmd, pitch_cmd
 
     def _get_damping_commands(self, sensors: SensorSuite) -> ThrusterCommands:
-        """Fully damps all 6 axes of motion."""
+        """Fully damps all 6 axes of motion.
+        SIM ONLY: uses ground-truth XY velocity, so it can't run on the real sub."""
         wdx, wdy = -sensors.velocity_x * self.DAMPING_GAIN, -sensors.velocity_y * self.DAMPING_GAIN
         h_rad = math.radians(sensors.heading)
         c, s = math.cos(h_rad), math.sin(h_rad)
@@ -184,7 +185,8 @@ class Submarine:
         return self._mix_and_normalize_commands(surge, sway, yaw, heave, pitch)
 
     def get_spin_damping_commands(self, sensors: SensorSuite, target_depth: Optional[float] = None):
-        """Damps everything *except* yaw, while holding depth."""
+        """Damps everything *except* yaw, while holding depth.
+        SIM ONLY: uses ground-truth XY velocity, so it can't run on the real sub."""
         target_depth = target_depth if target_depth is not None else self.target_depth
 
         wdx, wdy = -sensors.velocity_x * self.DAMPING_GAIN, -sensors.velocity_y * self.DAMPING_GAIN
@@ -200,11 +202,9 @@ class Submarine:
                              sway_power=0.0, 
                              target_depth: Optional[float] = None,
                              target_pitch: float = 0.0):
-        """Holds heading and depth/pitch (now with PID), applies surge/sway power."""
+        """Holds heading and depth/pitch (now with PID), applies surge/sway power.
+        Uses only measured values, so the policy can drive the real sub through it."""
         target_depth = target_depth if target_depth is not None else self.target_depth
-        
-        h_rad = math.radians(sensors.heading)
-        cos_h, sin_h = math.cos(h_rad), math.sin(h_rad)
 
         # Yaw Control
         yaw_err = angle_diff(heading, sensors.heading)
@@ -212,11 +212,8 @@ class Submarine:
         yaw_d = -sensors.imu.gyro_z * self.YAW_D_GAIN 
         yaw = np.clip(yaw_p + yaw_d, -1.0, 1.0)
         
-        # --- MODIFIED Sway Control ---
-        sway_vel = -sensors.velocity_x * sin_h + sensors.velocity_y * cos_h
-        sway_damp = -sway_vel * self.MANEUVER_DAMPING_GAIN
-        sway = np.clip(sway_power + sway_damp, -1.0, 1.0) 
-        # ---
+        # Open-loop sway: the real sub can't measure sway velocity to damp it.
+        sway = np.clip(sway_power, -1.0, 1.0)
         
         # Vertical Control
         heave, pitch = self.get_depth_pitch_commands(sensors, target_depth, target_pitch)
@@ -227,7 +224,7 @@ class Submarine:
                                 tx: float, ty: float, 
                                 tz: float, 
                                 yaw_p_gain_override: Optional[float] = None) -> ThrusterCommands:
-        
+        """Holds an XY position. SIM ONLY: uses ground-truth position and velocity."""
         # --- Horizontal XY Control (PID) ---
         yaw_p_gain = yaw_p_gain_override if yaw_p_gain_override is not None else self.HOVER_YAW_P_GAIN
         ex, ey = tx - sensors.x, ty - sensors.y
@@ -263,14 +260,9 @@ class Submarine:
         yaw_d = -sensors.imu.gyro_z * self.YAW_D_GAIN
         yaw = np.clip(yaw_p + yaw_d, -1.0, 1.0)
         
-        h_rad = math.radians(sensors.heading)
-        sway_vel = -sensors.velocity_x * math.sin(h_rad) + sensors.velocity_y * math.cos(h_rad)
-        sway = -sway_vel * self.MANEUVER_DAMPING_GAIN
-        sway = np.clip(sway, -0.5, 0.5) 
-        
         heave, pitch = self.get_depth_pitch_commands(sensors, target_depth, 0.0)
         
-        return self._mix_and_normalize_commands(surge_power, sway, yaw, heave, pitch)
+        return self._mix_and_normalize_commands(surge_power, 0.0, yaw, heave, pitch)
 
     def _mix_and_normalize_commands(self, surge, sway, yaw, heave, pitch) -> ThrusterCommands:
         """

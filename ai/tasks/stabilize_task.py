@@ -64,7 +64,7 @@ class StabilizeTask(Task):
 
         self.state_timer += dt
         speed_xy = math.hypot(sensors.velocity_x, sensors.velocity_y)
-        speed_z = abs(sensors.velocity_z)
+        speed_z = abs(sensors.depth_rate)
         self._current_speed = speed_xy
         self._current_speed_z = speed_z
 

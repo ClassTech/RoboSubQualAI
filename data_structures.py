@@ -24,11 +24,15 @@ class MPU6050Readings:
 
 @dataclass
 class SensorSuite:
+    # --- Measured by the real sub (with simulated noise) ---
     camera_image: pygame.Surface
     depth: float
     heading: float
     pitch: float
     imu: MPU6050Readings
+    depth_rate: float = 0.0 # m/s, positive = going deeper (filtered pressure sensor)
+    # --- Ground truth: SIMULATOR ONLY, the real sub can't measure these. ---
+    # Used only by the scripted hover/damping helpers. Never feed them to the policy.
     x: float = 0.0
     y: float = 0.0
     velocity_x: float = 0.0

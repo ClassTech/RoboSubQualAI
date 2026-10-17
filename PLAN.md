@@ -16,9 +16,10 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
 - [x] Add pole collisions and a gate-pass check: the sub crosses the gate plane between the poles, at a valid depth. (`collision.py`)
 
 ## Phase 2: Sensors the real sub actually has
-- [ ] Depth comes from the pressure sensor, and depth rate from a smoothed derivative of it.
-- [ ] Heading comes from a simulated magnetometer, with noise and a random constant offset per episode. Pitch and rates come from the IMU.
-- [ ] Remove true-velocity inputs from the loops. Depth damping switches to the smoothed depth rate. Sway damping in `get_heading_commands()` goes. Position hold (`_get_pid_hover_commands`) is kept out of training.
+- [x] Depth comes from the pressure sensor, and depth rate from a smoothed derivative of it. (`sensor_model.py`, alpha-beta filter)
+- [x] Heading comes from a simulated magnetometer, with noise and a random constant offset per episode. Pitch and rates come from the IMU, with noise and per-episode gyro bias. Noise levels are in `SensorNoiseConfig` and are guesses to tune against the real sensors.
+- [x] Remove true-velocity inputs from the loops. Depth damping switches to the smoothed depth rate. Sway damping in `get_heading_commands()` goes. Position hold (`_get_pid_hover_commands`) is kept out of training.
+  - The scripted tasks still use ground truth for position hold and end-of-task damping (`_get_pid_hover_commands`, `_get_damping_commands`, `get_spin_damping_commands`). These are marked SIM ONLY, as are the ground-truth fields in `SensorSuite`, so the scripted baseline has an advantage the policy won't.
 
 ## Phase 3: Simulated detector
 - [ ] Compute each object's bounding box from the sub's true pose and the camera geometry (70° FOV, 320×240), in the same format as `find_blobs_hsv`.
@@ -50,4 +51,5 @@ The display stays optional: training runs without a window, and the same physics
 ## Open questions
 - Should the policy control sway as well? The orbit task uses it, but the gate task doesn't need it. Leaning toward leaving it out for the gate task.
 - `subInertia_Z = 0.35` looks high. A solid 4 kg box of the sub's size would be about 0.14 kg·m², so the sim may turn slower than the real sub.
+- `sensor_model.py` imports `data_structures.py`, which imports pygame. Untangle this in the Phase 1 physics split.
 - `submarineHeight` (0.25 m) and `gatePoleRadius` (0.025 m) in `config.py` are guesses. Measure the real sub and gate.
