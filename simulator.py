@@ -18,6 +18,7 @@ from world import PrequalGate, PrequalMarker
 from data_structures import ThrusterCommands, MPU6050Readings, SensorSuite, Vision
 # ---
 from ai.submarine import Submarine
+from collision import build_obstacles, find_collision, check_gate_crossing
 
 
 class SubmarineSimulator:
@@ -51,6 +52,10 @@ class SubmarineSimulator:
         self.force_gravity = self.subMass * self.config.gravity
         self.force_buoyancy = self.config.subVolume * self.config.waterDensity * self.config.gravity
         self.netBuoyancyForce = self.force_buoyancy - self.force_gravity
+        # Corner thrusters are angled 45 deg so their thrust lines miss the center.
+        # Perpendicular distance from the center to each thrust line:
+        self.yawLeverArm = 0.7071 * (self.config.submarineLength / 2 + self.config.submarineWidth / 2)
+        self.poleBottomZ = self.config.worldDepth - 0.01
 
         self.submarineAI = submarine_ai
         self.prequal_gate: Optional[PrequalGate] = None
@@ -70,6 +75,11 @@ class SubmarineSimulator:
             z_bottom = self.config.worldDepth - 0.01,
             radius = self.prequal_config.MARKER_DIAMETER_METERS / 2, color = self.prequal_config.MARKER_COLOR
         )
+        self.obstacles = build_obstacles(self.prequal_gate, self.prequal_marker,
+                                         self.config.gatePoleRadius, self.poleBottomZ)
+        self.lastCollision = None
+        self.collisionCount = 0
+        self.gatePasses = 0
         start_heading = 0
         start_depth = self.prequal_config.START_Z_POS
 
@@ -108,7 +118,7 @@ class SubmarineSimulator:
         thrust_sway  = (f_hfl - f_hfr - f_hal + f_har) * cos_45
         thrust_heave = f_vf + f_vr
         sub_l_half = self.config.submarineLength / 2
-        thrust_yaw = (commands.hfl - commands.hfr + commands.hal - commands.har) * self.thrusterMaxForce
+        thrust_yaw = (f_hfl - f_hfr + f_hal - f_har) * self.yawLeverArm
         thrust_pitch = (f_vf - f_vr) * sub_l_half
         h_rad = math.radians(self.subPhysics.heading)
         p_rad = math.radians(self.subPhysics.pitch)
@@ -151,6 +161,8 @@ class SubmarineSimulator:
             gyro_z=self.subPhysics.angular_velocity_z,
             gyro_y=self.subPhysics.angular_velocity_y
         )
+        prev = (self.subPhysics.x, self.subPhysics.y, self.subPhysics.z,
+                self.subPhysics.heading, self.subPhysics.pitch)
         self.subPhysics.x += self.subPhysics.velocity_x * dt
         self.subPhysics.y += self.subPhysics.velocity_y * dt
         self.subPhysics.z += self.subPhysics.velocity_z * dt
@@ -161,6 +173,30 @@ class SubmarineSimulator:
         self.subPhysics.x = np.clip(self.subPhysics.x, margin, self.config.worldWidth - margin)
         self.subPhysics.y = np.clip(self.subPhysics.y, margin, self.config.worldHeight - margin)
         self.subPhysics.z = np.clip(self.subPhysics.z, 0.0, self.config.worldDepth - 0.2)
+        self._resolveCollisions(prev)
+        if self.prequal_gate:
+            crossing = check_gate_crossing(self.prequal_gate, prev[0], prev[1], prev[2],
+                                           self.subPhysics.x, self.subPhysics.y, self.subPhysics.z,
+                                           self.poleBottomZ)
+            if crossing:
+                if crossing.inside_opening: self.gatePasses += 1
+                where = "through the gate" if crossing.inside_opening else "outside the gate opening"
+                print(f"Gate plane crossed {'forward' if crossing.direction > 0 else 'backward'} {where} "
+                      f"(y={crossing.y:.2f}, z={crossing.z:.2f})")
+
+    def _resolveCollisions(self, prev):
+        """ On contact, return the sub to its last clear pose and stop it. """
+        s = self.subPhysics
+        hit = find_collision(s.x, s.y, s.z, s.heading, self.config.submarineLength,
+                             self.config.submarineWidth, self.config.submarineHeight, self.obstacles)
+        if hit:
+            if self.lastCollision is None:
+                self.collisionCount += 1
+                print(f"Collision with {hit.name} at x={s.x:.2f}, y={s.y:.2f}, z={s.z:.2f}")
+            s.x, s.y, s.z, s.heading, s.pitch = prev
+            s.velocity_x = s.velocity_y = s.velocity_z = 0.0
+            s.angular_velocity_z = s.angular_velocity_y = 0.0
+        self.lastCollision = hit
 
     def project3D(self, world_pos: Tuple[float, float, float]) -> Optional[Tuple[int, int, float]]:
         # (Remains the same)
@@ -265,7 +301,8 @@ class SubmarineSimulator:
         stats=[f"Time: {time.time()-self.startTime:.1f}s", f"Task: {task}", f"State: {state}",
                f"Speed (XY): {speed:.2f} m/s", f"Vel Z: {self.subPhysics.velocity_z:.2f} m/s",
                f"Heading: {self.subPhysics.heading:.1f}°", f"Pitch: {self.subPhysics.pitch:.1f}°",
-               f"Depth: {self.subPhysics.z:.2f} m"]
+               f"Depth: {self.subPhysics.z:.2f} m",
+               f"Gate passes: {self.gatePasses}  Collisions: {self.collisionCount}"]
         for s in stats: self.screen.blit(self.smallFont.render(s,True,BLACK),(20,y)); y+=20
         y+=10; imu = self.last_imu_readings
         imu_stats=["IMU:",

@@ -35,6 +35,8 @@ class SimulationConfig:
     cameraFov: float = 70.0
     submarineWidth: float = 0.46
     submarineLength: float = 0.457
+    submarineHeight: float = 0.25 # Collision box height (m) - ASSUMED, TUNE ME
+    gatePoleRadius: float = 0.025 # ~2in PVC - ASSUMED, TUNE ME
 
     # --- NEW 3D Physics Properties ---
     subMass: float = 4.0        # Mass (kg) 
