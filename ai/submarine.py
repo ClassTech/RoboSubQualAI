@@ -53,7 +53,8 @@ class Submarine:
         
         self.vision = Vision(image_provider=lambda: self._latest_sensors.camera_image if self._latest_sensors else None,
                              min_pole_pixels=self.MIN_PIXELS_FOR_DETECTION,
-                             min_gate_pixels=50) 
+                             min_gate_pixels=50,
+                             detection_provider=lambda: self._latest_sensors.detections if self._latest_sensors else None)
         
         self.reset()
 

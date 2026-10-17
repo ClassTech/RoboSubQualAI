@@ -33,6 +33,8 @@ class SimulationConfig:
     worldHeight: float = 15.0
     worldDepth: float = 2.1 # 7ft
     cameraFov: float = 70.0
+    cameraWidth: int = 320
+    cameraHeight: int = 240
     submarineWidth: float = 0.46
     submarineLength: float = 0.457
     submarineHeight: float = 0.25 # Collision box height (m) - ASSUMED, TUNE ME
@@ -75,6 +77,19 @@ class SensorNoiseConfig:
     gyroNoiseStd: float = 0.005             # Gyro noise (rad/s)
     gyroBiasRange: Tuple[float, float] = (-0.005, 0.005)    # Gyro bias (rad/s)
     accelNoiseStd: float = 0.05             # Accelerometer noise (m/s^2)
+
+# --- Simulated Detector Noise (all ASSUMED, TUNE ME against the real camera) ---
+# Ranges are (min, max), drawn uniformly per episode at reset.
+@dataclass
+class DetectorNoiseConfig:
+    edgeJitterPx: Tuple[float, float] = (0.5, 2.0)        # Per-edge noise, fixed part (px)
+    edgeJitterFrac: Tuple[float, float] = (0.01, 0.05)    # Per-edge noise, fraction of box size
+    dropoutRatePerSec: Tuple[float, float] = (0.0, 0.5)   # How often an object starts being missed
+    dropoutMeanSec: float = 0.3                           # Mean length of a miss
+    clearRange: Tuple[float, float] = (6.0, 10.0)         # Water clarity: detection is reliable inside this (m)
+    maxRange: Tuple[float, float] = (12.0, 18.0)          # ...and impossible beyond this (m)
+    falsePositivesPerSec: Tuple[float, float] = (0.0, 0.5) # Per color
+    latencySec: Tuple[float, float] = (0.03, 0.15)        # Camera + processing delay
 
 # --- Pre-Qualification Course Configuration ---
 @dataclass

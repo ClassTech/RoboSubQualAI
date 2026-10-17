@@ -20,10 +20,16 @@ from data_structures import ThrusterCommands, MPU6050Readings, SensorSuite, Visi
 from ai.submarine import Submarine
 from collision import build_obstacles, find_collision, check_gate_crossing
 from sensor_model import SensorModel
+from detector_model import DetectorModel
+from perception import CameraModel
 
 
 class SubmarineSimulator:
-    def __init__(self, submarine_ai: Submarine, width=1200, height=800):
+    def __init__(self, submarine_ai: Submarine, width=1200, height=800, detector_mode: str = "opencv"):
+        """detector_mode: 'opencv' (render the camera and run OpenCV on it),
+        'perfect' (simulated detector, no noise) or 'noisy' (simulated detector with noise)."""
+        assert detector_mode in ("opencv", "perfect", "noisy"), detector_mode
+        self.detector_mode = detector_mode
         pygame.init()
         self.width, self.height = width, height
         self.screen = pygame.display.set_mode((width, height))
@@ -35,7 +41,8 @@ class SubmarineSimulator:
         self.scaleY = height * 0.8 / self.config.worldHeight
         self.font = pygame.font.Font(None, 36)
         self.smallFont = pygame.font.Font(None, 24)
-        self.cameraSurface = pygame.Surface((320, 240))
+        self.cameraSurface = pygame.Surface((self.config.cameraWidth, self.config.cameraHeight))
+        self.cameraModel = CameraModel(self.config.cameraWidth, self.config.cameraHeight, self.config.cameraFov)
         try:
             bg_img = pygame.image.load("BackgroundImage.jpg").convert()
             h=480; w=int(bg_img.get_width()*(h/bg_img.get_height()))
@@ -79,6 +86,11 @@ class SubmarineSimulator:
         )
         self.obstacles = build_obstacles(self.prequal_gate, self.prequal_marker,
                                          self.config.gatePoleRadius, self.poleBottomZ)
+        self.detector = None
+        if self.detector_mode != "opencv":
+            self.detector = DetectorModel(self.cameraModel, self.prequal_gate, self.prequal_marker,
+                                          self.poleBottomZ, self.config.gatePoleRadius,
+                                          noisy=self.detector_mode == "noisy")
         self.lastCollision = None
         self.collisionCount = 0
         self.gatePasses = 0
@@ -325,42 +337,45 @@ class SubmarineSimulator:
         for i,(l,v) in enumerate(v_labels): self._drawThrusterBar(tx+180+i*40,ty,l,v)
 
     def run(self):
-        # (Remains the same)
         while self.running:
              dt = self.clock.tick(60) / 1000.0;
              if dt > 0.1: dt = 0.1
              self.handleInput()
-             if self.paused:
-                 self.render()
-                 continue
-             self.generateCameraView()
-             measured = self.sensorModel.read(self.subPhysics, self.last_imu_readings, dt)
-             sensors = SensorSuite(camera_image=self.cameraSurface, depth=measured.depth,
-                                   heading=measured.heading, pitch=measured.pitch,
-                                   imu=measured.imu, depth_rate=measured.depth_rate,
-                                   x=self.subPhysics.x, y=self.subPhysics.y,
-                                   velocity_x=self.subPhysics.velocity_x, velocity_y=self.subPhysics.velocity_y,
-                                   angular_velocity_y=self.subPhysics.angular_velocity_y,
-                                   velocity_z=self.subPhysics.velocity_z)
-             thrusterCommands, vision_results = self.submarineAI.update(dt, sensors)
-             if thrusterCommands.pause_simulation: self.paused = True
-             self.lastThrusterCommands = thrusterCommands
-             # --- Vision Debug Drawing (Remains the same) ---
-             for pole in vision_results.red_blobs:
-                  pygame.draw.rect(self.cameraSurface, ORANGE,
-                                   (pole['min_x'], pole['min_y'], pole['width'], pole['height']), 1)
-             gate_pair = vision_results.get_gate_pair()
-             if gate_pair:
-                 left_pole, right_pole = gate_pair
-                 min_x = left_pole['min_x']
-                 max_x = right_pole['max_x']
-                 min_y = min(left_pole['min_y'], right_pole['min_y'])
-                 max_y = max(left_pole['max_y'], right_pole['max_y'])
-                 pygame.draw.rect(self.cameraSurface, YELLOW, (min_x, min_y, max_x - min_x, max_y - min_y), 1)
-             best_pole = vision_results.get_best_pole()
-             if best_pole:
-                  pygame.draw.rect(self.cameraSurface, GREEN,
-                                   (best_pole['min_x'], best_pole['min_y'], best_pole['width'], best_pole['height']), 2)
-             self.applyPhysics(dt, thrusterCommands)
+             if not self.paused:
+                 self.step(dt)
              self.render()
         pygame.quit()
+
+    def step(self, dt: float):
+        """ One sense / think / move cycle, without drawing the main window. """
+        self.generateCameraView()
+        detections = self.detector.detect(self.subPhysics, dt) if self.detector else None
+        measured = self.sensorModel.read(self.subPhysics, self.last_imu_readings, dt)
+        sensors = SensorSuite(camera_image=self.cameraSurface, depth=measured.depth,
+                              heading=measured.heading, pitch=measured.pitch,
+                              imu=measured.imu, depth_rate=measured.depth_rate,
+                              x=self.subPhysics.x, y=self.subPhysics.y,
+                              velocity_x=self.subPhysics.velocity_x, velocity_y=self.subPhysics.velocity_y,
+                              angular_velocity_y=self.subPhysics.angular_velocity_y,
+                              velocity_z=self.subPhysics.velocity_z,
+                              detections=detections)
+        thrusterCommands, vision_results = self.submarineAI.update(dt, sensors)
+        if thrusterCommands.pause_simulation: self.paused = True
+        self.lastThrusterCommands = thrusterCommands
+        # --- Vision Debug Drawing (Remains the same) ---
+        for pole in vision_results.red_blobs:
+             pygame.draw.rect(self.cameraSurface, ORANGE,
+                              (pole['min_x'], pole['min_y'], pole['width'], pole['height']), 1)
+        gate_pair = vision_results.get_gate_pair()
+        if gate_pair:
+            left_pole, right_pole = gate_pair
+            min_x = left_pole['min_x']
+            max_x = right_pole['max_x']
+            min_y = min(left_pole['min_y'], right_pole['min_y'])
+            max_y = max(left_pole['max_y'], right_pole['max_y'])
+            pygame.draw.rect(self.cameraSurface, YELLOW, (min_x, min_y, max_x - min_x, max_y - min_y), 1)
+        best_pole = vision_results.get_best_pole()
+        if best_pole:
+             pygame.draw.rect(self.cameraSurface, GREEN,
+                              (best_pole['min_x'], best_pole['min_y'], best_pole['width'], best_pole['height']), 2)
+        self.applyPhysics(dt, thrusterCommands)

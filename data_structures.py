@@ -5,6 +5,7 @@ including the Vision class which holds an image provider and analyzes on demand.
 """
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Tuple, Any, Callable 
+from detector_model import Detections
 import pygame
 import numpy as np 
 # --- Import the blob finding function ---
@@ -31,6 +32,8 @@ class SensorSuite:
     pitch: float
     imu: MPU6050Readings
     depth_rate: float = 0.0 # m/s, positive = going deeper (filtered pressure sensor)
+    # Boxes from the simulated detector; None means run OpenCV on camera_image instead.
+    detections: Optional[Detections] = None
     # --- Ground truth: SIMULATOR ONLY, the real sub can't measure these. ---
     # Used only by the scripted hover/damping helpers. Never feed them to the policy.
     x: float = 0.0
@@ -50,12 +53,14 @@ class Vision:
                  image_provider: Callable[[], pygame.Surface],
                  # Default thresholds - consider passing these from Submarine/Config
                  min_pole_pixels: int = 20, 
-                 min_gate_pixels: int = 50):
+                 min_gate_pixels: int = 50,
+                 detection_provider: Optional[Callable[[], Optional[Detections]]] = None):
                  
         if not callable(image_provider):
              raise TypeError("image_provider must be a callable function")
              
         self.image_provider = image_provider
+        self.detection_provider = detection_provider
         self.min_pole_pixels = min_pole_pixels
         self.min_gate_pixels = min_gate_pixels
 
@@ -80,6 +85,13 @@ class Vision:
         Fetches the current camera image, performs blob detection for
         relevant colors, stores results internally, and clears caches.
         """
+        detections = self.detection_provider() if self.detection_provider else None
+        if detections is not None:
+             # Simulated detector: boxes are already computed, skip OpenCV.
+             self.green_blobs = detections.green_blobs
+             self.red_blobs = detections.red_blobs
+             self._clear_cache()
+             return
         current_image = self.image_provider()
         if current_image is None:
              # Handle case where provider fails (e.g., during shutdown)

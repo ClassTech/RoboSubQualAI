@@ -22,9 +22,13 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
   - The scripted tasks still use ground truth for position hold and end-of-task damping (`_get_pid_hover_commands`, `_get_damping_commands`, `get_spin_damping_commands`). These are marked SIM ONLY, as are the ground-truth fields in `SensorSuite`, so the scripted baseline has an advantage the policy won't.
 
 ## Phase 3: Simulated detector
-- [ ] Compute each object's bounding box from the sub's true pose and the camera geometry (70° FOV, 320×240), in the same format as `find_blobs_hsv`.
-- [ ] Add noise in this order: box jitter, missed detections, false positives, latency.
-- [ ] Write one shared function that turns a box into bearing and range. The same code runs on the Pi, so only the real camera's FOV and resolution need checking.
+- [x] Compute each object's bounding box from the sub's true pose and the camera geometry (70° FOV, 320×240), in the same format as `find_blobs_hsv`. (`detector_model.py`; `main.py --detector opencv|perfect|noisy`)
+- [x] Add noise in this order: box jitter, missed detections, false positives, latency. Levels are in `DetectorNoiseConfig` and are guesses to tune against the real camera.
+- [x] Write one shared function that turns a box into bearing and range. The same code runs on the Pi, so only the real camera's FOV and resolution need checking. (`perception.py`: `estimate_pole`, `estimate_gate`)
+- Findings from `tools/check_detector.py` (simulated boxes vs OpenCV on the rendered image, over a full mission):
+  - Gate pole boxes agree within 1–2 px. Range from the pole's bottom end is within 1–2%, and gate range within ~1%. Range from pole width alone is poor (median 24% off with OpenCV).
+  - The renderer takes two shortcuts the simulated detector doesn't. It draws gate poles 5 px wide at any distance. It draws the marker too narrow when viewed at an angle, and drops it when it's partly off-screen or very close.
+  - At 320×240, physically sized 2" gate poles fall below the 50-pixel minimum beyond about 5–6 m. The scripted orbit relies on seeing the gate from 8–10 m, so the scripted mission fails with the simulated detector (0/6 perfect, 0/6 noisy; `tools/run_headless.py`). With noise, its tasks also treat a single missed frame as "target lost".
 
 ## Phase 4: Gymnasium environment for the gate task
 - [ ] **Observations:** depth, depth rate, heading, pitch, pitch rate, yaw rate, and per object found/bearing/range/confidence plus time since last seen. Add the last action and a few stacked past steps, because the gate drops out of view about 1.4 m before you pass it.
@@ -49,6 +53,9 @@ The display stays optional: training runs without a window, and the same physics
 - [ ] Check that the numpy policy and the PyTorch policy give the same outputs on recorded observations.
 
 ## Open questions
+- What resolution and field of view does the real camera have? This sets how far away the gate can be seen.
+- Fix the renderer to draw objects at their physical size, so OpenCV mode and the simulated detector agree?
+- Make the scripted mission work with realistic detection (re-tune the orbit width, tolerate brief misses), or accept it as a weak baseline?
 - Should the policy control sway as well? The orbit task uses it, but the gate task doesn't need it. Leaning toward leaving it out for the gate task.
 - `subInertia_Z = 0.35` looks high. A solid 4 kg box of the sub's size would be about 0.14 kg·m², so the sim may turn slower than the real sub.
 - `sensor_model.py` imports `data_structures.py`, which imports pygame. Untangle this in the Phase 1 physics split.

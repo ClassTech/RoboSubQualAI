@@ -3,13 +3,16 @@
 Main entry point for the Autonomous Submarine Simulator.
 Assembles and starts the simulation.
 """
+import argparse
+
 from simulator import SubmarineSimulator
 from ai.submarine import Submarine
 # --- Absolute imports from ai.tasks package ---
 from ai.tasks import GateTask, StabilizeTask, OrbitTurnTask, ShutdownTask
 # ---
 
-if __name__ == "__main__":
+def build_mission():
+    """The scripted qualification mission (also the baseline for the RL policy)."""
     # --- SET MISSION DEPTH ---
     MISSION_DEPTH = 1.5 # Run 1.5m deep
     SURFACE_DEPTH = 0.1 # Just under the surface
@@ -53,7 +56,16 @@ if __name__ == "__main__":
         surface_task,
         shutdown_task
     ]
+    return mission
 
-    submarine_ai = Submarine(mission_plan=mission)
-    sim = SubmarineSimulator(submarine_ai=submarine_ai)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run the scripted mission in the simulator.")
+    parser.add_argument("--detector", choices=["opencv", "perfect", "noisy"], default="opencv",
+                        help="opencv: run OpenCV on the rendered camera image (default). "
+                             "perfect/noisy: use the simulated detector, without or with noise.")
+    args = parser.parse_args()
+
+    submarine_ai = Submarine(mission_plan=build_mission())
+    sim = SubmarineSimulator(submarine_ai=submarine_ai, detector_mode=args.detector)
     sim.run()

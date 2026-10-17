@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""
+Turns camera bounding boxes into bearing and range. This file is shared with the
+Raspberry Pi, so it uses only the standard library: no pygame, numpy or OpenCV.
+
+Boxes are dicts in the find_blobs_hsv() format (center_x, center_y, width,
+height, min_x, max_x, min_y, max_y, area), in pixels, origin at the top left.
+
+Conventions:
+- bearing_deg: angle from the camera's forward axis, positive = LEFT, which is
+  the direction heading increases. So the object's heading is heading + bearing.
+- range_m: horizontal distance from the camera to the object.
+- Depths are positive down; pitch is positive nose-up (matches the simulator).
+"""
+import math
+from dataclasses import dataclass
+from typing import Optional
+
+
+@dataclass
+class CameraModel:
+    width: int = 320
+    height: int = 240
+    fov_deg: float = 70.0   # Horizontal field of view
+
+    @property
+    def focal_px(self) -> float:
+        return self.width / (2 * math.tan(math.radians(self.fov_deg / 2)))
+
+
+@dataclass
+class Estimate:
+    bearing_deg: float
+    range_m: Optional[float]  # None if no method applied
+    method: str               # Which method gave the range: bottom, height, width, separation, poles
+
+
+def bearing_deg(cam: CameraModel, pixel_x: float) -> float:
+    return math.degrees(math.atan((cam.width / 2 - pixel_x) / cam.focal_px))
+
+
+def _below_horizon_rad(cam: CameraModel, pixel_y: float, pitch_deg: float) -> float:
+    """Angle below horizontal of a ray through image row pixel_y."""
+    return math.atan((pixel_y - cam.height / 2) / cam.focal_px) - math.radians(pitch_deg)
+
+
+def estimate_pole(box: dict, cam: CameraModel, diameter_m: float,
+                  height_m: Optional[float] = None,
+                  bottom_depth_m: Optional[float] = None,
+                  camera_depth_m: Optional[float] = None,
+                  pitch_deg: float = 0.0,
+                  edge_margin_px: int = 1,
+                  min_angle_deg: float = 3.0) -> Estimate:
+    """
+    Bearing and range to a vertical pole. Tries, most accurate first:
+    1. bottom: the pole's bottom end is in view and its depth is known (e.g. the
+       pool floor), so range follows from the camera depth and the angle down to it.
+    2. height: both ends are in view and the visible length is known.
+    3. width: the pole's diameter. Always available but noisy for thin poles.
+    """
+    b = bearing_deg(cam, box['center_x'])
+    cos_b = math.cos(math.radians(b))
+    f = cam.focal_px
+    bottom_in_view = box['max_y'] < cam.height - edge_margin_px
+    top_in_view = box['min_y'] > edge_margin_px
+
+    if bottom_in_view and bottom_depth_m is not None and camera_depth_m is not None:
+        drop = bottom_depth_m - camera_depth_m
+        angle = _below_horizon_rad(cam, box['max_y'], pitch_deg)
+        if drop > 0 and angle > math.radians(min_angle_deg):
+            return Estimate(b, drop / math.tan(angle) / cos_b, "bottom")
+
+    if bottom_in_view and top_in_view and height_m is not None and box['height'] > 0:
+        return Estimate(b, f * height_m / box['height'] / cos_b, "height")
+
+    if box['width'] > 0:
+        return Estimate(b, f * diameter_m / box['width'] / cos_b, "width")
+    return Estimate(b, None, "none")
+
+
+def estimate_gate(left: dict, right: dict, cam: CameraModel, gate_width_m: float,
+                  left_est: Optional[Estimate] = None,
+                  right_est: Optional[Estimate] = None) -> Estimate:
+    """
+    Bearing and range to the middle of the gate, from its two pole boxes.
+    If both poles have good ranges (bottom or height methods), the midpoint is
+    found from the two pole positions. Otherwise range comes from the angle
+    between the poles and the known gate width, which assumes a head-on view
+    and overestimates range when viewed at an angle.
+    """
+    good = ("bottom", "height")
+    if left_est and right_est and left_est.method in good and right_est.method in good:
+        pts = []
+        for est in (left_est, right_est):
+            a = math.radians(est.bearing_deg)
+            pts.append((est.range_m * math.cos(a), est.range_m * math.sin(a)))
+        mx, my = (pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2
+        return Estimate(math.degrees(math.atan2(my, mx)), math.hypot(mx, my), "poles")
+
+    b_left = bearing_deg(cam, left['center_x'])
+    b_right = bearing_deg(cam, right['center_x'])
+    half_angle = math.radians(abs(b_left - b_right)) / 2
+    b = (b_left + b_right) / 2
+    if half_angle <= 0:
+        return Estimate(b, None, "none")
+    return Estimate(b, (gate_width_m / 2) / math.tan(half_angle), "separation")
