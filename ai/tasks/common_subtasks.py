@@ -14,6 +14,7 @@ from data_structures import SensorSuite, Vision, ThrusterCommands
 # ---
 from config import SimulationConfig
 from utils import angle_diff
+from perception import CameraModel, bearing_deg
 # --- NO IMPORT from task_base here ---
 
 # --- DiveToDepth Subtask ---
@@ -101,7 +102,7 @@ class DynamicOrbitPole(Subtask):
     """
     Orbits the pole by applying constant sway and using yaw control
     to keep the pole at a target X fraction. Uses PID surge control based
-    on apparent WIDTH to maintain distance.
+    on apparent WIDTH (as a fraction of image width) to maintain distance.
     Completes when the gate is visible AND the pole is >= 80% screen width.
     """
     def __init__(self,
@@ -109,10 +110,10 @@ class DynamicOrbitPole(Subtask):
                  sway_power: float = -0.3,
                  yaw_gain: float = 1.5,
                  # --- CHANGED to WIDTH ---
-                 target_pole_width_px: int = 40, # Target apparent width for distance
-                 orbit_width_p_gain: float = 0.05, # P gain for width error -> surge (NEEDS TUNING)
-                 orbit_width_i_gain: float = 0.01, # I gain (NEEDS TUNING)
-                 orbit_width_d_gain: float = 0.05, # D gain (NEEDS TUNING)
+                 target_pole_width_fraction: float = 0.125, # Target apparent width, fraction of image width
+                 orbit_width_p_gain: float = 16.0, # P gain for width error -> surge (NEEDS TUNING)
+                 orbit_width_i_gain: float = 3.2,  # I gain (NEEDS TUNING)
+                 orbit_width_d_gain: float = 16.0, # D gain (NEEDS TUNING)
                  orbit_width_i_clamp: float = 0.3, # Max integral contribution
                  # ---
                  lost_timeout: float = 3.0,
@@ -122,7 +123,7 @@ class DynamicOrbitPole(Subtask):
         self.sway_power = sway_power
         self.yaw_gain = yaw_gain
         # Width PID parameters
-        self.target_pole_width_px = target_pole_width_px
+        self.target_pole_width_fraction = target_pole_width_fraction
         self.width_p_gain = orbit_width_p_gain
         self.width_i_gain = orbit_width_i_gain
         self.width_d_gain = orbit_width_d_gain
@@ -143,21 +144,21 @@ class DynamicOrbitPole(Subtask):
         # Get initial width error
         pole_blob = vision_data.get_best_pole()
         if pole_blob:
-            current_width = pole_blob['width']
-            self.last_width_error = self.target_pole_width_px - current_width
+            cam_w, _ = sensors.camera_image.get_size()
+            self.last_width_error = self.target_pole_width_fraction - pole_blob['width'] / cam_w
         else:
              self.last_width_error = 0.0 # Assume no error if not visible yet
 
-        print(f"INFO: DynamicOrbitPole starting. Target X: {self.target_x_fraction*100:.0f}%, Sway: {self.sway_power}, Target Width: {self.target_pole_width_px}px")
+        print(f"INFO: DynamicOrbitPole starting. Target X: {self.target_x_fraction*100:.0f}%, Sway: {self.sway_power}, Target Width: {self.target_pole_width_fraction:.3f} of image")
 
     def execute(self, sub: 'Submarine', dt: float, sensors: SensorSuite, vision_data: Vision, config: SimulationConfig, context: Dict[str, Any]) -> Tuple[SubtaskStatus, ThrusterCommands]:
         pole_visible = vision_data.is_pole_visible()
         pole_blob = vision_data.get_best_pole() # Get the full blob data
         pole_center_x = pole_blob['center_x'] if pole_blob else None
-        current_width = pole_blob['width'] if pole_blob else 0.0
         gate_visible = vision_data.is_gate_visible()
 
         cam_w, _ = sensors.camera_image.get_size()
+        current_width = pole_blob['width'] / cam_w if pole_blob else 0.0
         target_pole_x_px = cam_w * self.target_x_fraction
 
         # --- Completion Check: Gate Visible AND Gate Right of Pole? ---
@@ -186,7 +187,7 @@ class DynamicOrbitPole(Subtask):
             sway_cmd = self.sway_power
 
             # --- NEW: Surge PID Controller based on WIDTH ---
-            width_error = self.target_pole_width_px - current_width
+            width_error = self.target_pole_width_fraction - current_width
             # Update integral term
             self.integral_width_err += width_error * dt
             self.integral_width_err = np.clip(self.integral_width_err, -self.width_i_clamp, self.width_i_clamp)
@@ -234,15 +235,22 @@ class DynamicOrbitPole(Subtask):
 class SwayUntilTargetLost(Subtask):
     """
     Sways straight (holding heading and depth) until the specified
-    vision target (default='pole') is lost.
+    vision target (default='pole') leaves the view. It only counts as gone if
+    it was last seen near an image edge; a miss in mid-image (a dropout) just
+    keeps the sway going, failing after lost_timeout seconds.
     """
-    def __init__(self, sway_power: float = -0.3, target_type: str = 'pole'):
+    def __init__(self, sway_power: float = -0.3, target_type: str = 'pole',
+                 edge_margin_fraction: float = 0.1, lost_timeout: float = 5.0):
         if target_type not in ['gate', 'pole', 'either']:
              raise ValueError("target_type must be 'gate', 'pole', or 'either'")
         self.sway_power = sway_power # Negative = Left
         self.target_type = target_type
+        self.edge_margin_fraction = edge_margin_fraction
+        self.lost_timeout = lost_timeout
         self.heading_to_hold: Optional[float] = None
         self.target_was_visible = False
+        self.last_near_edge = False
+        self.time_unseen = 0.0
         self.target_depth: float = 0.1
 
     def on_enter(self, sub: 'Submarine', sensors: SensorSuite,
@@ -250,6 +258,8 @@ class SwayUntilTargetLost(Subtask):
                  context: Dict[str, Any]):
         self.heading_to_hold = context.get('initial_heading', sensors.heading)
         self.target_depth = context.get('target_depth', sensors.depth)
+        self.last_near_edge = False
+        self.time_unseen = 0.0
         if self.target_type == 'gate':
              self.target_was_visible = vision.is_gate_visible()
         elif self.target_type == 'pole':
@@ -267,28 +277,34 @@ class SwayUntilTargetLost(Subtask):
         if self.heading_to_hold is None:
              print("WARN: SwayUntilTargetLost heading_to_hold is None, using current.")
              self.heading_to_hold = sensors.heading
-        currently_visible = False
-        if self.target_type == 'gate':
-             currently_visible = vision.is_gate_visible()
-        elif self.target_type == 'pole':
-             currently_visible = vision.is_pole_visible()
-        else: # either
-             currently_visible = vision.is_gate_visible() or vision.is_pole_visible()
-        if currently_visible:
+        # Horizontal extent of the target in the image, if visible
+        extent = None
+        if self.target_type in ('gate', 'either') and vision.is_gate_visible():
+             left, right = vision.get_gate_pair()
+             extent = (left['min_x'], right['max_x'])
+        elif self.target_type in ('pole', 'either') and vision.is_pole_visible():
+             pole = vision.get_best_pole()
+             extent = (pole['min_x'], pole['max_x'])
+        commands = sub.get_heading_commands(sensors, self.heading_to_hold,
+                                            surge_power=0.0,
+                                            sway_power=self.sway_power,
+                                            target_depth=self.target_depth)
+        if extent is not None:
+            cam_w, _ = sensors.camera_image.get_size()
+            margin = self.edge_margin_fraction * cam_w
             self.target_was_visible = True
-            commands = sub.get_heading_commands(sensors, self.heading_to_hold,
-                                                surge_power=0.0,
-                                                sway_power=self.sway_power,
-                                                target_depth=self.target_depth)
+            self.last_near_edge = extent[0] < margin or extent[1] > cam_w - margin
+            self.time_unseen = 0.0
             return SubtaskStatus.RUNNING, commands
-        else:
-            if self.target_was_visible:
-                print(f"INFO: SwayUntilTargetLost complete. Target '{self.target_type}' lost.")
-                context['initial_heading'] = sensors.heading
-                return SubtaskStatus.COMPLETED, sub._get_damping_commands(sensors)
-            else:
-                print(f"ERROR: SwayUntilTargetLost failed. Target '{self.target_type}' never visible.")
-                return SubtaskStatus.FAILED, sub._get_damping_commands(sensors)
+        self.time_unseen += dt
+        if self.target_was_visible and self.last_near_edge:
+            print(f"INFO: SwayUntilTargetLost complete. Target '{self.target_type}' left the view.")
+            context['initial_heading'] = sensors.heading
+            return SubtaskStatus.COMPLETED, sub._get_damping_commands(sensors)
+        if self.time_unseen > self.lost_timeout:
+            print(f"ERROR: SwayUntilTargetLost failed. Target '{self.target_type}' not seen for {self.lost_timeout}s.")
+            return SubtaskStatus.FAILED, sub._get_damping_commands(sensors)
+        return SubtaskStatus.RUNNING, commands
 
     def get_dynamic_name(self, context: Dict[str, Any]) -> str:
         return f"{self.name}({self.sway_power:+.1f})"
@@ -355,29 +371,53 @@ class Stabilize(Subtask):
 # --- Vision-Based Subtasks ---
 
 class DriveUntilTargetLost(Subtask):
-    def __init__(self, surge_power: float = 0.5, target_type: str = 'gate'):
+    """
+    Drives forward, steering at the target's center while it's in view and
+    holding the last heading when it isn't, until the target drops out of view
+    because we're passing it, i.e. it was large (close) when last seen. If it drops out
+    while still small (far away, e.g. missed detections), keeps driving and only
+    fails after lost_timeout seconds without seeing it.
+    """
+    def __init__(self, surge_power: float = 0.5, target_type: str = 'gate',
+                 pass_size_fraction: float = 0.3, lost_timeout: float = 12.0):
         if target_type not in ['gate', 'pole', 'either']: raise ValueError("target_type must be 'gate', 'pole', or 'either'")
         self.surge_power = surge_power; self.target_type = target_type
-        self.heading_to_hold: Optional[float] = None; self.target_was_visible = False; self.target_depth: float = 0.1
+        self.pass_size_fraction = pass_size_fraction; self.lost_timeout = lost_timeout
+        self.heading_to_hold: Optional[float] = None; self.target_depth: float = 0.1
+        self.target_was_visible = False; self.last_size_fraction = 0.0; self.time_unseen = 0.0
+    def _visible_target(self, vision: Vision, cam_w: float) -> Optional[Tuple[float, float]]:
+        """(width as a fraction of image width, center x in pixels), or None if not visible."""
+        if self.target_type in ('gate', 'either') and vision.is_gate_visible():
+            left, right = vision.get_gate_pair()
+            return (right['max_x'] - left['min_x']) / cam_w, vision.get_gate_center_x()
+        if self.target_type in ('pole', 'either') and vision.is_pole_visible():
+            pole = vision.get_best_pole()
+            return pole['width'] / cam_w, pole['center_x']
+        return None
     def on_enter(self, sub: 'Submarine', sensors: SensorSuite, vision: Vision, context: Dict[str, Any]):
         self.heading_to_hold = context.get('initial_heading', sensors.heading)
         self.target_depth = context.get('target_depth', sensors.depth)
-        if self.target_type == 'gate': self.target_was_visible = vision.is_gate_visible()
-        elif self.target_type == 'pole': self.target_was_visible = vision.is_pole_visible()
-        else: self.target_was_visible = vision.is_gate_visible() or vision.is_pole_visible()
+        self.target_was_visible = False; self.last_size_fraction = 0.0; self.time_unseen = 0.0
     def execute(self, sub: 'Submarine', dt: float, sensors: SensorSuite, vision: Vision, config: SimulationConfig, context: Dict[str, Any]) -> Tuple[SubtaskStatus, ThrusterCommands]:
         if self.heading_to_hold is None: self.heading_to_hold = sensors.heading
-        currently_visible = False
-        if self.target_type == 'gate': currently_visible = vision.is_gate_visible()
-        elif self.target_type == 'pole': currently_visible = vision.is_pole_visible()
-        else: currently_visible = vision.is_gate_visible() or vision.is_pole_visible()
-        if currently_visible:
-            self.target_was_visible = True
-            commands = sub.get_heading_commands(sensors, self.heading_to_hold, self.surge_power, target_depth=self.target_depth)
-            return SubtaskStatus.RUNNING, commands
+        cam_w, cam_h = sensors.camera_image.get_size()
+        target = self._visible_target(vision, cam_w)
+        if target is not None:
+            size, center_x = target
+            self.target_was_visible = True; self.last_size_fraction = size; self.time_unseen = 0.0
+            # Steer at the target: its heading is our heading plus its bearing (positive = left).
+            bearing = bearing_deg(CameraModel(cam_w, cam_h, config.cameraFov), center_x)
+            self.heading_to_hold = (sensors.heading + bearing) % 360
         else:
-            if self.target_was_visible: return SubtaskStatus.COMPLETED, sub._get_damping_commands(sensors)
-            else: return SubtaskStatus.FAILED, sub._get_damping_commands(sensors)
+            self.time_unseen += dt
+            if self.target_was_visible and self.last_size_fraction >= self.pass_size_fraction:
+                return SubtaskStatus.COMPLETED, sub._get_damping_commands(sensors)
+            if self.time_unseen > self.lost_timeout:
+                print(f"ERROR: DriveUntilTargetLost - '{self.target_type}' not seen for {self.lost_timeout}s while still far away")
+                return SubtaskStatus.FAILED, sub._get_damping_commands(sensors)
+        # Drive on while it's in view, or after a far-away miss; wait in place if never seen yet.
+        surge = self.surge_power if self.target_was_visible else 0.0
+        return SubtaskStatus.RUNNING, sub.get_heading_commands(sensors, self.heading_to_hold, surge, target_depth=self.target_depth)
 
 class WaitForTargetVisible(Subtask):
     def __init__(self, target_type='either'):
@@ -393,8 +433,8 @@ class WaitForTargetVisible(Subtask):
         else: heave, pitch = sub.get_depth_pitch_commands(sensors, self.target_depth, 0.0); return SubtaskStatus.RUNNING, sub._mix_and_normalize_commands(0, 0, 0, heave, pitch)
 
 class AlignToObjectX(Subtask):
-    def __init__(self, target_x_fraction: float, tolerance_px: int = 15, yaw_gain: float = 0.8, yaw_rate_tolerance: float = 0.05):
-        self.target_x_fraction=target_x_fraction; self.tolerance_px=tolerance_px; self.yaw_gain=yaw_gain; self.yaw_rate_tolerance=yaw_rate_tolerance
+    def __init__(self, target_x_fraction: float, tolerance_fraction: float = 0.047, yaw_gain: float = 0.8, yaw_rate_tolerance: float = 0.05):
+        self.target_x_fraction=target_x_fraction; self.tolerance_fraction=tolerance_fraction; self.yaw_gain=yaw_gain; self.yaw_rate_tolerance=yaw_rate_tolerance
         self.target_depth: float = 0.1
     def on_enter(self, sub: 'Submarine', sensors: SensorSuite, vision_data: Vision, context: Dict[str, Any]):
         self.target_depth = context.get('target_depth', sensors.depth)
@@ -407,32 +447,33 @@ class AlignToObjectX(Subtask):
         pixel_error_x = current_center_x - target_pixel_x
         yaw_p = -(pixel_error_x / (cam_w / 2)) * self.yaw_gain; yaw_d = -sensors.imu.gyro_z * sub.YAW_D_GAIN
         yaw = np.clip(yaw_p + yaw_d, -1.0, 1.0)
-        is_centered = abs(pixel_error_x) < self.tolerance_px; is_stable = abs(sensors.imu.gyro_z) < self.yaw_rate_tolerance
+        is_centered = abs(pixel_error_x) < self.tolerance_fraction * cam_w; is_stable = abs(sensors.imu.gyro_z) < self.yaw_rate_tolerance
         if is_centered and is_stable: context['initial_heading'] = sensors.heading; return SubtaskStatus.COMPLETED, sub._get_damping_commands(sensors)
         heave, pitch = sub.get_depth_pitch_commands(sensors, self.target_depth, 0.0)
         return SubtaskStatus.RUNNING, sub._mix_and_normalize_commands(0.0, 0.0, yaw, heave, pitch)
     def on_exit(self, sub: 'Submarine', sensors: SensorSuite, vision_data: Vision, context: Dict[str, Any]): context['initial_heading'] = sensors.heading
 
 class ApproachAndCenterObject(Subtask):
-    def __init__(self, height_threshold_px: int, target_x_fraction: float = 0.5, surge_p_gain: float = 0.1, height_tolerance_px: int = 5, yaw_gain: float = 1.5, align_tolerance_px: int = 15, lost_timeout: float = 2.0):
-        self.height_threshold = height_threshold_px; self.target_x_fraction = target_x_fraction
-        self.surge_p_gain = surge_p_gain; self.height_tolerance = height_tolerance_px
-        self.yaw_gain = yaw_gain; self.align_tolerance_px = align_tolerance_px
+    """Heights are fractions of image height, alignment a fraction of image width."""
+    def __init__(self, height_threshold_fraction: float, target_x_fraction: float = 0.5, surge_p_gain: float = 24.0, height_tolerance_fraction: float = 0.02, yaw_gain: float = 1.5, align_tolerance_fraction: float = 0.047, lost_timeout: float = 2.0):
+        self.height_threshold = height_threshold_fraction; self.target_x_fraction = target_x_fraction
+        self.surge_p_gain = surge_p_gain; self.height_tolerance = height_tolerance_fraction
+        self.yaw_gain = yaw_gain; self.align_tolerance_fraction = align_tolerance_fraction
         self.lost_timeout = lost_timeout; self.time_since_target_lost = 0.0; self.target_depth: float = 0.1
     def on_enter(self, sub: 'Submarine', sensors: SensorSuite, vision_data: Vision, context: Dict[str, Any]):
         self.time_since_target_lost = 0.0; self.target_depth = context.get('target_depth', sensors.depth)
-        print(f"INFO: Approach starting. Target Height: {self.height_threshold}px, Target X: {self.target_x_fraction*100:.0f}%")
+        print(f"INFO: Approach starting. Target Height: {self.height_threshold:.2f} of image, Target X: {self.target_x_fraction*100:.0f}%")
     def execute(self, sub: 'Submarine', dt: float, sensors: SensorSuite, vision_data: Vision, config: SimulationConfig, context: Dict[str, Any]) -> Tuple[SubtaskStatus, ThrusterCommands]:
         target_height = vision_data.get_pole_apparent_height(); target_center_x = vision_data.get_pole_center_x(); is_visible = vision_data.is_pole_visible()
         if is_visible and target_center_x is not None:
             self.time_since_target_lost = 0.0
-            height_error = self.height_threshold - target_height; surge = height_error * self.surge_p_gain; surge = np.clip(surge, -0.4, 0.5)
-            cam_w, _ = sensors.camera_image.get_size(); target_pixel_x = cam_w * self.target_x_fraction
+            cam_w, cam_h = sensors.camera_image.get_size(); target_pixel_x = cam_w * self.target_x_fraction
+            height_error = self.height_threshold - target_height / cam_h; surge = height_error * self.surge_p_gain; surge = np.clip(surge, -0.4, 0.5)
             pixel_error_x = target_center_x - target_pixel_x
             yaw_p = -(pixel_error_x / (cam_w / 2)) * self.yaw_gain; yaw_d = -sensors.imu.gyro_z * sub.YAW_D_GAIN
             yaw = np.clip(yaw_p + yaw_d, -1.0, 1.0)
             heave, pitch = sub.get_depth_pitch_commands(sensors, self.target_depth, 0.0)
-            is_at_dist = abs(height_error) < self.height_tolerance; is_aligned = abs(pixel_error_x) < self.align_tolerance_px
+            is_at_dist = abs(height_error) < self.height_tolerance; is_aligned = abs(pixel_error_x) < self.align_tolerance_fraction * cam_w
             if is_at_dist and is_aligned: print("INFO: Approach complete."); context['initial_heading'] = sensors.heading; return SubtaskStatus.COMPLETED, sub._get_damping_commands(sensors)
             return SubtaskStatus.RUNNING, sub._mix_and_normalize_commands(surge, 0.0, yaw, heave, pitch)
         else:

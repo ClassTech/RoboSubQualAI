@@ -27,6 +27,7 @@ def run_once(detector: str, max_seconds: float, seed: int):
     log = io.StringIO()
     with redirect_stdout(log):
         sim = SubmarineSimulator(Submarine(mission_plan=build_mission()), detector_mode=detector)
+        sim.renderCamera = detector == "opencv"
         t = 0.0
         ai = sim.submarineAI
         while t < max_seconds and ai.current_task_index < len(ai.mission_plan):
@@ -35,7 +36,7 @@ def run_once(detector: str, max_seconds: float, seed: int):
     done = ai.current_task_index >= len(ai.mission_plan)
     failed = "FAILED" in log.getvalue()
     last_task = "complete" if done else f"{ai.get_current_task_name()}/{ai.get_current_state_name()}"
-    return done and not failed, t, sim.gatePasses, sim.collisionCount, last_task, log.getvalue()
+    return done and not failed and sim.gatePasses >= 2, t, sim.gatePasses, sim.collisionCount, last_task, log.getvalue()
 
 
 def main():

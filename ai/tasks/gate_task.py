@@ -30,7 +30,7 @@ class GateTask(Task):
             DiveToDepth(),
             WaitForTargetVisible(target_type='gate'),
             AlignToObjectX(target_x_fraction=0.5,
-                           tolerance_px=10,
+                           tolerance_fraction=0.031,
                            yaw_gain=1.5,
                            yaw_rate_tolerance=0.05),
             Stabilize(duration=1.0, speed_threshold=0.1),

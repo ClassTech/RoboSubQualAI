@@ -54,7 +54,9 @@ class Submarine:
         self.vision = Vision(image_provider=lambda: self._latest_sensors.camera_image if self._latest_sensors else None,
                              min_pole_pixels=self.MIN_PIXELS_FOR_DETECTION,
                              min_gate_pixels=50,
-                             detection_provider=lambda: self._latest_sensors.detections if self._latest_sensors else None)
+                             detection_provider=lambda: self._latest_sensors.detections if self._latest_sensors else None,
+                             image_width=self.config.cameraWidth,
+                             image_height=self.config.cameraHeight)
         
         self.reset()
 
@@ -71,6 +73,7 @@ class Submarine:
         self.integral_x_err, self.integral_y_err = 0.0, 0.0 
         self.integral_z_err = 0.0 
         self._latest_sensors = None 
+        if hasattr(self, 'vision'): self.vision.reset()
 
     def update(self, dt: float, sensors: SensorSuite) -> Tuple[ThrusterCommands, Vision]:
 
@@ -84,7 +87,7 @@ class Submarine:
 
         current_task = self.mission_plan[self.current_task_index]
         self.target_depth = getattr(current_task, 'target_depth', self.target_depth)
-        self.vision.update()
+        self.vision.update(dt)
 
         depth_error = self.target_depth - sensors.depth
         self.integral_z_err = np.clip(self.integral_z_err + depth_error * dt, -self.integral_clamp_z, self.integral_clamp_z)

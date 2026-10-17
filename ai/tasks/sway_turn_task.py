@@ -36,7 +36,7 @@ class SwayTurnTask(Task):
 
     def __init__(self, 
                  target_depth: float = 1.0,
-                 approach_height_px: int = 80,
+                 approach_height_fraction: float = 0.33,
                  sway_duration: float = 3.0,
                  sway_power: float = -0.5): # Negative = Left
         
@@ -51,16 +51,16 @@ class SwayTurnTask(Task):
             # 2. Align to it
             AlignToObjectX(
                 target_x_fraction=0.5,
-                tolerance_px=10,
+                tolerance_fraction=0.031,
                 yaw_gain=1.5,
                 yaw_rate_tolerance=0.05
             ),
             
             # 3. Get close to it
             ApproachAndCenterObject(
-                height_threshold_px=approach_height_px,
-                surge_p_gain=0.1,
-                height_tolerance_px=10,
+                height_threshold_fraction=approach_height_fraction,
+                surge_p_gain=24.0,
+                height_tolerance_fraction=0.042,
                 yaw_gain=1.5
             ),
             

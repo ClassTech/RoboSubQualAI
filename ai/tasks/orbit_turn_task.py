@@ -28,15 +28,15 @@ class OrbitTurnTask(Task):
     """
     def __init__(self,
                  target_depth: float = 1.0,
-                 approach_height_px: int = 120, # Reduced approach height
+                 approach_height_fraction: float = 0.5, # Pole height as a fraction of image height
                  orbit_target_fraction: float = 0.5, # Keep pole centered during orbit
                  orbit_sway_power: float = -0.1,     # Slow sway left
                  orbit_yaw_gain: float = 2.5,
                  # --- NEW Width Parameters ---
-                 orbit_target_width_px: int = 50,  # Target width during orbit (NEEDS TUNING)
-                 orbit_width_p_gain: float = 0.05, # Gain for width error -> surge (NEEDS TUNING)
-                 orbit_width_i_gain: float = 0.01, # (NEEDS TUNING)
-                 orbit_width_d_gain: float = 0.05, # (NEEDS TUNING)
+                 orbit_target_width_fraction: float = 0.156, # Target width, fraction of image width (NEEDS TUNING)
+                 orbit_width_p_gain: float = 16.0, # Gain for width-fraction error -> surge (NEEDS TUNING)
+                 orbit_width_i_gain: float = 3.2,  # (NEEDS TUNING)
+                 orbit_width_d_gain: float = 16.0, # (NEEDS TUNING)
                  orbit_width_i_clamp: float = 0.3, # (NEEDS TUNING)
                  # ---
                  final_sway_power: float = -0.3):    # Sway power for final move
@@ -52,19 +52,19 @@ class OrbitTurnTask(Task):
             # 2. Align to center (50%)
             AlignToObjectX(
                 target_x_fraction=0.5,
-                tolerance_px=15,
+                tolerance_fraction=0.047,
                 yaw_gain=orbit_yaw_gain,
                 yaw_rate_tolerance=0.05
             ),
 
             # 3. Get close to it while keeping it CENTERED
             ApproachAndCenterObject(
-                height_threshold_px=approach_height_px, # Use height for initial approach
+                height_threshold_fraction=approach_height_fraction, # Use height for initial approach
                 target_x_fraction=0.5, # Keep centered
-                surge_p_gain=0.1,
-                height_tolerance_px=15,
+                surge_p_gain=24.0,
+                height_tolerance_fraction=0.0625,
                 yaw_gain=orbit_yaw_gain,
-                align_tolerance_px=20
+                align_tolerance_fraction=0.0625
             ),
 
             # 4. Stop briefly
@@ -76,7 +76,7 @@ class OrbitTurnTask(Task):
                 sway_power=orbit_sway_power,
                 yaw_gain=orbit_yaw_gain,
                 # --- Pass WIDTH parameters ---
-                target_pole_width_px=orbit_target_width_px,
+                target_pole_width_fraction=orbit_target_width_fraction,
                 orbit_width_p_gain=orbit_width_p_gain,
                 orbit_width_i_gain=orbit_width_i_gain,
                 orbit_width_d_gain=orbit_width_d_gain,

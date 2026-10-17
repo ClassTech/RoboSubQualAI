@@ -25,11 +25,11 @@ def build_mission():
     # --- USE NEW ORBIT TASK ---
     # --- REMOVED initial_align_fraction argument ---
     orbit_task = OrbitTurnTask(target_depth=MISSION_DEPTH,
-                               approach_height_px=180,
+                               approach_height_fraction=0.75,
                                orbit_target_fraction=0.5,
                                orbit_sway_power=-0.5,      # Negative = Left for orbit
                                orbit_yaw_gain=4.5,
-                               orbit_target_width_px=40,
+                               orbit_target_width_fraction=0.125, # ~1.7 m from the marker
                                final_sway_power=-0.5)      
     # ---
 

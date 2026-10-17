@@ -22,6 +22,7 @@ from collision import build_obstacles, find_collision, check_gate_crossing
 from sensor_model import SensorModel
 from detector_model import DetectorModel
 from perception import CameraModel
+from camera_geometry import segment_polygon, distance_to
 
 
 class SubmarineSimulator:
@@ -43,9 +44,11 @@ class SubmarineSimulator:
         self.smallFont = pygame.font.Font(None, 24)
         self.cameraSurface = pygame.Surface((self.config.cameraWidth, self.config.cameraHeight))
         self.cameraModel = CameraModel(self.config.cameraWidth, self.config.cameraHeight, self.config.cameraFov)
+        self.renderCamera = True # Headless runs with a simulated detector can skip drawing the camera image
+        self.overlayWidth = max(1, self.config.cameraWidth // 320) # Debug box line width, so boxes survive the downscaled view
         try:
             bg_img = pygame.image.load("BackgroundImage.jpg").convert()
-            h=480; w=int(bg_img.get_width()*(h/bg_img.get_height()))
+            h=2*self.config.cameraHeight; w=int(bg_img.get_width()*(h/bg_img.get_height()))
             self.camera_background = pygame.transform.scale(bg_img, (w,h))
             self.camera_background_pano = pygame.Surface((w*2,h))
             self.camera_background_pano.blit(self.camera_background,(0,0)); self.camera_background_pano.blit(self.camera_background,(w,0))
@@ -65,7 +68,7 @@ class SubmarineSimulator:
         self.yawLeverArm = 0.7071 * (self.config.submarineLength / 2 + self.config.submarineWidth / 2)
         self.poleBottomZ = self.config.worldDepth - 0.01
 
-        self.sensorModel = SensorModel()
+        self.sensorModel = SensorModel(rng=random.Random(random.random())) # Seeded from the global RNG, so runs can be replayed
         self.submarineAI = submarine_ai
         self.prequal_gate: Optional[PrequalGate] = None
         self.prequal_marker: Optional[PrequalMarker] = None
@@ -90,8 +93,10 @@ class SubmarineSimulator:
         if self.detector_mode != "opencv":
             self.detector = DetectorModel(self.cameraModel, self.prequal_gate, self.prequal_marker,
                                           self.poleBottomZ, self.config.gatePoleRadius,
-                                          noisy=self.detector_mode == "noisy")
+                                          noisy=self.detector_mode == "noisy",
+                                          rng=random.Random(random.random()))
         self.lastCollision = None
+        self.timeSinceContact = float('inf')
         self.collisionCount = 0
         self.gatePasses = 0
         start_heading = 0
@@ -188,7 +193,7 @@ class SubmarineSimulator:
         self.subPhysics.x = np.clip(self.subPhysics.x, margin, self.config.worldWidth - margin)
         self.subPhysics.y = np.clip(self.subPhysics.y, margin, self.config.worldHeight - margin)
         self.subPhysics.z = np.clip(self.subPhysics.z, 0.0, self.config.worldDepth - 0.2)
-        self._resolveCollisions(prev)
+        self._resolveCollisions(prev, dt)
         if self.prequal_gate:
             crossing = check_gate_crossing(self.prequal_gate, prev[0], prev[1], prev[2],
                                            self.subPhysics.x, self.subPhysics.y, self.subPhysics.z,
@@ -199,13 +204,16 @@ class SubmarineSimulator:
                 print(f"Gate plane crossed {'forward' if crossing.direction > 0 else 'backward'} {where} "
                       f"(y={crossing.y:.2f}, z={crossing.z:.2f})")
 
-    def _resolveCollisions(self, prev):
+    def _resolveCollisions(self, prev, dt):
         """ On contact, return the sub to its last clear pose and stop it. """
         s = self.subPhysics
         hit = find_collision(s.x, s.y, s.z, s.heading, self.config.submarineLength,
                              self.config.submarineWidth, self.config.submarineHeight, self.obstacles)
+        clear_for = self.timeSinceContact
+        self.timeSinceContact = 0.0 if hit else self.timeSinceContact + dt
         if hit:
-            if self.lastCollision is None:
+            # A new collision, unless it's the same contact bumping again within half a second
+            if clear_for > 0.5:
                 self.collisionCount += 1
                 print(f"Collision with {hit.name} at x={s.x:.2f}, y={s.y:.2f}, z={s.z:.2f}")
             s.x, s.y, s.z, s.heading, s.pitch = prev
@@ -227,67 +235,43 @@ class SubmarineSimulator:
 
 
     def generateCameraView(self):
-        # --- MODIFIED: Marker drawing uses apparent width ---
+        """ Draws the camera image: background, then every object at its real size, far to near. """
         w,h = self.cameraSurface.get_size()
         if self.camera_background_pano:
              bg_w,bg_h = self.camera_background.get_size()
              x_off = (self.subPhysics.heading/360)*bg_w
-             y_off = np.clip(((bg_h-h)/2)-(self.subPhysics.pitch*2.0), 0, bg_h-h)
+             px_per_deg = h / 120.0 # Tuned as 2 px/deg at 240 tall
+             y_off = np.clip(((bg_h-h)/2)-(self.subPhysics.pitch*px_per_deg), 0, bg_h-h)
              self.cameraSurface.blit(self.camera_background_pano, (-x_off, -y_off))
         else:
              self.cameraSurface.fill(WATER_COLOR)
              hp = self.project3D((self.subPhysics.x+20, self.subPhysics.y, self.config.worldDepth))
              if hp: pygame.draw.rect(self.cameraSurface, POOL_FLOOR_COLOR, (0,hp[1],w,h))
 
-        drawable = []
+        # (p1, p2, radius, color) for each object: the same geometry the detector uses.
+        segments = []
         if self.prequal_gate:
              g = self.prequal_gate
-             half_w = g.width / 2
-             pole_color = g.color
-             bar_z = g.z_top
-             pole_z_bottom = self.config.worldDepth - 0.01
-             l_bar = self.project3D((g.x, g.center_y - half_w, bar_z))
-             r_bar = self.project3D((g.x, g.center_y + half_w, bar_z))
-             l_bot = self.project3D((g.x, g.center_y - half_w, pole_z_bottom))
-             r_bot = self.project3D((g.x, g.center_y + half_w, pole_z_bottom))
-             if l_bar and r_bar:
-                 avg_dist = (l_bar[2] + r_bar[2]) / 2
-                 drawable.append((avg_dist, 'line', GRAY, l_bar[:2], r_bar[:2], 5)) # Bar is GRAY
-             if l_bar and l_bot:
-                 avg_dist = (l_bar[2] + l_bot[2]) / 2
-                 drawable.append((avg_dist, 'line', pole_color, l_bar[:2], l_bot[:2], 5)) # Pole is RED
-             if r_bar and r_bot:
-                 avg_dist = (r_bar[2] + r_bot[2]) / 2
-                 drawable.append((avg_dist, 'line', pole_color, r_bar[:2], r_bot[:2], 5)) # Pole is RED
-
+             r = self.config.gatePoleRadius
+             left = (g.x, g.center_y - g.width / 2)
+             right = (g.x, g.center_y + g.width / 2)
+             segments.append(((*left, g.z_top), (*right, g.z_top), r, GRAY))        # Top bar
+             segments.append(((*left, g.z_top), (*left, self.poleBottomZ), r, g.color))
+             segments.append(((*right, g.z_top), (*right, self.poleBottomZ), r, g.color))
         if self.prequal_marker:
              m = self.prequal_marker
-             # Project top and bottom points
-             tp = self.project3D((m.x, m.y, m.z_top))
-             bp = self.project3D((m.x, m.y, m.z_bottom))
+             segments.append(((m.x, m.y, m.z_top), (m.x, m.y, m.z_bottom), m.radius, m.color))
 
-             # --- Calculate apparent width ---
-             apparent_width_px = 8 # Default width
-             # Project left/right edges at the sub's current depth for width calculation
-             # (Using sub's Z might be more stable than using marker Z, especially if pole is tall)
-             proj_z = self.subPhysics.z
-             left_edge_pt = self.project3D((m.x, m.y - m.radius, proj_z))
-             right_edge_pt = self.project3D((m.x, m.y + m.radius, proj_z))
-             if left_edge_pt and right_edge_pt:
-                 apparent_width_px = max(1, int(abs(right_edge_pt[0] - left_edge_pt[0])))
-             # ---
-
-             # Draw the line using calculated width
-             if tp and bp:
-                 avg_dist = (tp[2] + bp[2]) / 2
-                 drawable.append((avg_dist, 'line', m.color, tp[:2], bp[:2], apparent_width_px))
-
-        drawable.sort(key=lambda x: x[0], reverse=True)
-        for d in drawable:
-             if d[1]=='line': pygame.draw.line(self.cameraSurface, d[2], d[3], d[4], d[5])
-             elif d[1]=='polygon': pygame.draw.polygon(self.cameraSurface, d[2], d[3], d[4])
-             elif d[1]=='rect': pygame.draw.rect(self.cameraSurface, d[2], d[3])
-        # --- END MODIFIED SECTION ---
+        drawable = []
+        for p1, p2, radius, color in segments:
+             poly = segment_polygon(self.subPhysics, self.cameraModel, p1, p2, radius)
+             if poly:
+                 drawable.append((distance_to(self.subPhysics, p1, p2), color, poly))
+        drawable.sort(key=lambda d: d[0], reverse=True)
+        limit = 4 * max(w, h) # Keep huge coordinates of very close objects in a range pygame handles
+        for _, color, poly in drawable:
+             pts = [(min(max(x, -limit), limit), min(max(y, -limit), limit)) for x, y in poly]
+             pygame.draw.polygon(self.cameraSurface, color, pts)
 
     def render(self):
         # (Remains the same)
@@ -348,7 +332,7 @@ class SubmarineSimulator:
 
     def step(self, dt: float):
         """ One sense / think / move cycle, without drawing the main window. """
-        self.generateCameraView()
+        if self.renderCamera: self.generateCameraView()
         detections = self.detector.detect(self.subPhysics, dt) if self.detector else None
         measured = self.sensorModel.read(self.subPhysics, self.last_imu_readings, dt)
         sensors = SensorSuite(camera_image=self.cameraSurface, depth=measured.depth,
@@ -365,7 +349,7 @@ class SubmarineSimulator:
         # --- Vision Debug Drawing (Remains the same) ---
         for pole in vision_results.red_blobs:
              pygame.draw.rect(self.cameraSurface, ORANGE,
-                              (pole['min_x'], pole['min_y'], pole['width'], pole['height']), 1)
+                              (pole['min_x'], pole['min_y'], pole['width'], pole['height']), self.overlayWidth)
         gate_pair = vision_results.get_gate_pair()
         if gate_pair:
             left_pole, right_pole = gate_pair
@@ -373,9 +357,9 @@ class SubmarineSimulator:
             max_x = right_pole['max_x']
             min_y = min(left_pole['min_y'], right_pole['min_y'])
             max_y = max(left_pole['max_y'], right_pole['max_y'])
-            pygame.draw.rect(self.cameraSurface, YELLOW, (min_x, min_y, max_x - min_x, max_y - min_y), 1)
+            pygame.draw.rect(self.cameraSurface, YELLOW, (min_x, min_y, max_x - min_x, max_y - min_y), self.overlayWidth)
         best_pole = vision_results.get_best_pole()
         if best_pole:
              pygame.draw.rect(self.cameraSurface, GREEN,
-                              (best_pole['min_x'], best_pole['min_y'], best_pole['width'], best_pole['height']), 2)
+                              (best_pole['min_x'], best_pole['min_y'], best_pole['width'], best_pole['height']), 2 * self.overlayWidth)
         self.applyPhysics(dt, thrusterCommands)

@@ -19,10 +19,12 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from config import DetectorNoiseConfig
+from camera_geometry import segment_polygon
 from perception import CameraModel
 from world import PrequalGate, PrequalMarker, SubmarinePhysicsState
 
-NEAR_PLANE = 0.2  # m, same cutoff as the simulator's project3D()
+# Noise sizes in DetectorNoiseConfig are in pixels at this image width, and scale with resolution.
+REFERENCE_WIDTH_PX = 320
 
 
 @dataclass
@@ -40,17 +42,6 @@ class _Pole:
 class Detections:
     red_blobs: List[Dict]
     green_blobs: List[Dict]
-
-
-def _to_camera(state: SubmarinePhysicsState, p: Tuple[float, float, float]):
-    """World point -> camera frame (forward, left, up), matching project3D()."""
-    dx, dy, dz = p[0] - state.x, p[1] - state.y, p[2] - state.z
-    h, pt = math.radians(-state.heading), math.radians(-state.pitch)
-    ch, sh, cp, sp = math.cos(h), math.sin(h), math.cos(pt), math.sin(pt)
-    x_yaw, y_yaw = dx * ch - dy * sh, dx * sh + dy * ch
-    forward = x_yaw * cp + dz * sp
-    up = x_yaw * sp - dz * cp
-    return forward, y_yaw, up
 
 
 def make_box(min_x: float, min_y: float, max_x: float, max_y: float) -> Dict:
@@ -88,7 +79,8 @@ class DetectorModel:
 
     def reset(self):
         n, r = self.noise_cfg, self.rng
-        self.edge_px = r.uniform(*n.edgeJitterPx)
+        self.px_scale = self.cam.width / REFERENCE_WIDTH_PX
+        self.edge_px = r.uniform(*n.edgeJitterPx) * self.px_scale
         self.edge_frac = r.uniform(*n.edgeJitterFrac)
         self.dropout_rate = r.uniform(*n.dropoutRatePerSec)
         self.clear_range = r.uniform(*n.clearRange)
@@ -102,27 +94,13 @@ class DetectorModel:
     # --- Geometry ---
     def project_pole(self, state: SubmarinePhysicsState, pole: _Pole) -> Optional[Dict]:
         """Noise-free bounding box of a pole, clipped to the image, or None if not in view."""
-        top = _to_camera(state, (pole.x, pole.y, pole.z_top))
-        bot = _to_camera(state, (pole.x, pole.y, pole.z_bottom))
-        # Clip the pole's axis to the part in front of the near plane.
-        if top[0] < NEAR_PLANE and bot[0] < NEAR_PLANE:
+        poly = segment_polygon(state, self.cam, (pole.x, pole.y, pole.z_top),
+                               (pole.x, pole.y, pole.z_bottom), pole.radius)
+        if poly is None:
             return None
-        if top[0] < NEAR_PLANE or bot[0] < NEAR_PLANE:
-            front, back = (top, bot) if top[0] >= NEAR_PLANE else (bot, top)
-            t = (front[0] - NEAR_PLANE) / (front[0] - back[0])
-            back = tuple(front[i] + t * (back[i] - front[i]) for i in range(3))
-            top, bot = front, back
-
-        w, h, f = self.cam.width, self.cam.height, self.cam.focal_px
-        xs, ys = [], []
-        for fwd, left, up in (top, bot):
-            u = w / 2 - f * left / fwd
-            v = h / 2 - f * up / fwd
-            half_w = f * pole.radius / fwd
-            xs += [u - half_w, u + half_w]
-            ys.append(v)
-        min_x, max_x = max(0.0, min(xs)), min(float(w), max(xs))
-        min_y, max_y = max(0.0, min(ys)), min(float(h), max(ys))
+        w, h = self.cam.width, self.cam.height
+        min_x, max_x = max(0.0, min(p[0] for p in poly)), min(float(w), max(p[0] for p in poly))
+        min_y, max_y = max(0.0, min(p[1] for p in poly)), min(float(h), max(p[1] for p in poly))
         if max_x - min_x < 1 or max_y - min_y < 1:
             return None
         return make_box(min_x, min_y, max_x, max_y)
@@ -157,7 +135,8 @@ class DetectorModel:
 
     def _false_positive(self) -> Dict:
         r = self.rng
-        bw, bh = r.uniform(3, 20), r.uniform(10, 120)   # Pole-shaped, to be tempting
+        k = self.px_scale
+        bw, bh = r.uniform(3, 20) * k, r.uniform(10, 120) * k   # Pole-shaped, to be tempting
         x, y = r.uniform(0, self.cam.width - bw), r.uniform(0, self.cam.height - bh)
         return make_box(x, y, x + bw, y + bh)
 
