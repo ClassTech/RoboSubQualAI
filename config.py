@@ -86,8 +86,8 @@ class DetectorNoiseConfig:
     edgeJitterFrac: Tuple[float, float] = (0.01, 0.05)    # Per-edge noise, fraction of box size
     dropoutRatePerSec: Tuple[float, float] = (0.0, 0.5)   # How often an object starts being missed
     dropoutMeanSec: float = 0.3                           # Mean length of a miss
-    clearRange: Tuple[float, float] = (6.0, 10.0)         # Water clarity: detection is reliable inside this (m)
-    maxRange: Tuple[float, float] = (12.0, 18.0)          # ...and impossible beyond this (m)
+    clearRange: Tuple[float, float] = (25.0, 35.0)        # Water clarity: detection is reliable inside this (m). Pool is very clear.
+    maxRange: Tuple[float, float] = (35.0, 50.0)          # ...and impossible beyond this (m)
     falsePositivesPerSec: Tuple[float, float] = (0.0, 0.5) # Per color
     latencySec: Tuple[float, float] = (0.03, 0.15)        # Camera + processing delay
 

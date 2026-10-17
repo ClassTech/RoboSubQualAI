@@ -9,6 +9,7 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
 - Policy actions: heading setpoint, depth setpoint, open-loop surge power.
 - PID gains get tuned in the pool, so training randomizes them.
 - Development and training run on the iMac: Python 3.12 `.venv`, torch 2.2.2 (see `requirements.txt`).
+- The pool is very clear: detection is easy at 25 m (`DetectorNoiseConfig.clearRange` 25–35 m, `maxRange` 35–50 m).
 - Camera: 1280×960, 70° horizontal FOV. Objects are drawn at their real size (`camera_geometry.py`, shared by the renderer and the simulated detector).
 
 ## Phase 1: Simulator that runs without the display
@@ -32,7 +33,7 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
   - `Vision` holds a target for 0.5 s after a miss and only accepts one seen in 2 consecutive frames at about the same place.
   - "Until lost" subtasks only count a target as gone when it was close (gate) or at the image edge (sway), not after a mid-view dropout.
   - `DriveUntilTargetLost` steers at the gate while it's visible.
-  - Scripted mission, `tools/run_headless.py`: perfect detector 8/8. With all noise except range misses, 12/12. With all noise, about 4/12. All of those failures come from long range: the orbit needs to see the gate from ~10 m and the return starts ~12 m out, beyond the assumed 6–10 m water clarity.
+  - Scripted mission, `tools/run_headless.py`: perfect detector 8/8. Noisy detector with clear-pool ranges 20/20 (2 runs had one recovered collision). With the earlier murky-water guess (6–10 m) it was about 4/12, because the gate is ~10–12 m from the marker.
 
 ## Phase 4: Gymnasium environment for the gate task
 - [ ] **Observations:** depth, depth rate, heading, pitch, pitch rate, yaw rate, and per object found/bearing/range/confidence plus time since last seen. Add the last action and a few stacked past steps, because the gate drops out of view about 1.4 m before you pass it.
@@ -57,7 +58,6 @@ The display stays optional: training runs without a window, and the same physics
 - [ ] Check that the numpy policy and the PyTorch policy give the same outputs on recorded observations.
 
 ## Open questions
-- What water clarity should the sim assume? `DetectorNoiseConfig.clearRange` (6–10 m) and `maxRange` (12–18 m) are guesses, and they decide whether the scripted mission can see the gate from the marker.
 - The simulated detector doesn't model occlusion (e.g. a gate pole in front of the marker).
 - OpenCV mode at 1280×960 runs at roughly 20 fps on the iMac, so the graphics window is slower than before. The simulated detector is unaffected.
 - Should the policy control sway as well? The orbit task uses it, but the gate task doesn't need it. Leaning toward leaving it out for the gate task.
