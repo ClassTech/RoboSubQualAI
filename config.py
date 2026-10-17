@@ -33,6 +33,7 @@ class SimulationConfig:
     worldHeight: float = 15.0
     worldDepth: float = 2.1 # 7ft
     cameraFov: float = 70.0
+    physicsDt: float = 1 / 60  # Fixed physics time step (s)
     cameraWidth: int = 1280
     cameraHeight: int = 960
     submarineWidth: float = 0.46

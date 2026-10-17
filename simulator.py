@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Contains the main SubmarineSimulator class.
-This class handles Pygame, rendering, physics, and the main game loop.
+Contains the main SubmarineSimulator class: the pygame window, the rendered
+camera view, the scripted sub AI and the main loop. The physics, course,
+sensors and simulated detector live in sim_core.SubSim, which runs without
+a display.
 """
 import math
-import random
 import time
 from typing import Tuple, Optional
 
@@ -12,17 +13,10 @@ import pygame
 import numpy as np
 
 from config import *
-from world import SubmarinePhysicsState
-from world import PrequalGate, PrequalMarker
-# --- Import Vision ---
-from data_structures import ThrusterCommands, MPU6050Readings, SensorSuite, Vision
-# ---
+from data_structures import ThrusterCommands, SensorSuite
 from ai.submarine import Submarine
-from collision import build_obstacles, find_collision, check_gate_crossing
-from sensor_model import SensorModel
-from detector_model import DetectorModel
-from perception import CameraModel
 from camera_geometry import segment_polygon, distance_to
+from sim_core import SubSim
 
 
 class SubmarineSimulator:
@@ -36,14 +30,13 @@ class SubmarineSimulator:
         self.screen = pygame.display.set_mode((width, height))
         pygame.display.set_caption("Autonomous Submarine (AUV) Simulator")
         self.clock = pygame.time.Clock()
-        self.config = SimulationConfig()
-        self.prequal_config = PrequalConfig()
+        self.core = SubSim(detector_mode=None if detector_mode == "opencv" else detector_mode)
+        self.config = self.core.config
         self.scaleX = width * 0.7 / self.config.worldWidth
         self.scaleY = height * 0.8 / self.config.worldHeight
         self.font = pygame.font.Font(None, 36)
         self.smallFont = pygame.font.Font(None, 24)
         self.cameraSurface = pygame.Surface((self.config.cameraWidth, self.config.cameraHeight))
-        self.cameraModel = CameraModel(self.config.cameraWidth, self.config.cameraHeight, self.config.cameraFov)
         self.renderCamera = True # Headless runs with a simulated detector can skip drawing the camera image
         self.overlayWidth = max(1, self.config.cameraWidth // 320) # Debug box line width, so boxes survive the downscaled view
         try:
@@ -56,62 +49,27 @@ class SubmarineSimulator:
             print(f"Error loading background image: {e}")
             self.camera_background, self.camera_background_pano = None, None
 
-        self.subMass = self.config.subMass
-        self.subInertia_Z = self.config.subInertia_Z
-        self.subInertia_Y = self.config.subInertia_Y
-        self.thrusterMaxForce = self.config.thrusterMaxForce
-        self.force_gravity = self.subMass * self.config.gravity
-        self.force_buoyancy = self.config.subVolume * self.config.waterDensity * self.config.gravity
-        self.netBuoyancyForce = self.force_buoyancy - self.force_gravity
-        # Corner thrusters are angled 45 deg so their thrust lines miss the center.
-        # Perpendicular distance from the center to each thrust line:
-        self.yawLeverArm = 0.7071 * (self.config.submarineLength / 2 + self.config.submarineWidth / 2)
-        self.poleBottomZ = self.config.worldDepth - 0.01
-
-        self.sensorModel = SensorModel(rng=random.Random(random.random())) # Seeded from the global RNG, so runs can be replayed
         self.submarineAI = submarine_ai
-        self.prequal_gate: Optional[PrequalGate] = None
-        self.prequal_marker: Optional[PrequalMarker] = None
         self.resetSimulation()
 
     def resetSimulation(self):
-        # (resetSimulation remains the same)
-        self.prequal_gate = PrequalGate(
-            x = self.prequal_config.GATE_X_POS, center_y = self.config.worldHeight / 2,
-            z_top = self.prequal_config.GATE_DEPTH_METERS, width = self.prequal_config.GATE_WIDTH_METERS,
-            height = self.prequal_config.GATE_OPENING_HEIGHT, color = self.prequal_config.GATE_COLOR
-        )
-        self.prequal_marker = PrequalMarker(
-            x = self.prequal_config.MARKER_X_POS, y = self.config.worldHeight / 2,
-            z_top = -self.prequal_config.POLE_ABOVE_SURFACE_METERS,
-            z_bottom = self.config.worldDepth - 0.01,
-            radius = self.prequal_config.MARKER_DIAMETER_METERS / 2, color = self.prequal_config.MARKER_COLOR
-        )
-        self.obstacles = build_obstacles(self.prequal_gate, self.prequal_marker,
-                                         self.config.gatePoleRadius, self.poleBottomZ)
-        self.detector = None
-        if self.detector_mode != "opencv":
-            self.detector = DetectorModel(self.cameraModel, self.prequal_gate, self.prequal_marker,
-                                          self.poleBottomZ, self.config.gatePoleRadius,
-                                          noisy=self.detector_mode == "noisy",
-                                          rng=random.Random(random.random()))
-        self.lastCollision = None
-        self.timeSinceContact = float('inf')
-        self.collisionCount = 0
-        self.gatePasses = 0
-        start_heading = 0
-        start_depth = self.prequal_config.START_Z_POS
-
-        self.subPhysics = SubmarinePhysicsState(
-            x = self.prequal_config.START_X_POS, y = self.config.worldHeight / 2 + random.uniform(-0.5, 0.5),
-            z = start_depth,
-            heading = start_heading, pitch = 0.0
-        )
-        self.sensorModel.reset()
+        self.core.reset()
         self.submarineAI.reset()
         self.startTime = time.time()
         self.running, self.paused = True, False
-        self.lastThrusterCommands, self.last_imu_readings = ThrusterCommands(), MPU6050Readings()
+        self.lastThrusterCommands = ThrusterCommands()
+
+    # Shorthands for the core's state, used by the drawing code
+    @property
+    def subPhysics(self): return self.core.state
+    @property
+    def prequal_gate(self): return self.core.gate
+    @property
+    def prequal_marker(self): return self.core.marker
+    @property
+    def poleBottomZ(self): return self.core.pole_bottom_z
+    @property
+    def cameraModel(self): return self.core.camera
 
     def worldToScreen(self, x, y):
         # (Remains the same)
@@ -124,102 +82,6 @@ class SubmarineSimulator:
              elif event.type == pygame.KEYDOWN:
                  if event.key == pygame.K_SPACE: self.paused = not self.paused
                  elif event.key == pygame.K_r: self.resetSimulation()
-
-    def applyPhysics(self, dt, commands: ThrusterCommands):
-        # (Remains the same - 6-DoF Physics)
-        f_hfl = commands.hfl * self.thrusterMaxForce
-        f_hfr = commands.hfr * self.thrusterMaxForce
-        f_hal = commands.hal * self.thrusterMaxForce
-        f_har = commands.har * self.thrusterMaxForce
-        f_vf = commands.vf * self.thrusterMaxForce
-        f_vr = commands.vr * self.thrusterMaxForce
-        cos_45 = 0.7071
-        thrust_surge = (f_hfl + f_hfr + f_hal + f_har) * cos_45
-        thrust_sway  = (f_hfl - f_hfr - f_hal + f_har) * cos_45
-        thrust_heave = f_vf + f_vr
-        sub_l_half = self.config.submarineLength / 2
-        thrust_yaw = (f_hfl - f_hfr + f_hal - f_har) * self.yawLeverArm
-        thrust_pitch = (f_vf - f_vr) * sub_l_half
-        h_rad = math.radians(self.subPhysics.heading)
-        p_rad = math.radians(self.subPhysics.pitch)
-        cos_h, sin_h = math.cos(h_rad), math.sin(h_rad)
-        cos_p, sin_p = math.cos(p_rad), math.sin(p_rad)
-        vx_w, vy_w, vz_w = self.subPhysics.velocity_x, self.subPhysics.velocity_y, self.subPhysics.velocity_z
-        vel_surge = vx_w * cos_h + vy_w * sin_h
-        vel_sway  = -vx_w * sin_h + vy_w * cos_h
-        vel_heave = vz_w
-        drag_surge = -self.config.surgeDragCoeff * vel_surge * abs(vel_surge)
-        drag_sway  = -self.config.swayDragCoeff * vel_sway * abs(vel_sway)
-        drag_heave = -self.config.heaveDragCoeff * vel_heave * abs(vel_heave)
-        drag_yaw   = -self.config.angularDragCoeff_Z * self.subPhysics.angular_velocity_z**2 * np.sign(self.subPhysics.angular_velocity_z)
-        drag_pitch = -self.config.angularDragCoeff_Y * self.subPhysics.angular_velocity_y**2 * np.sign(self.subPhysics.angular_velocity_y)
-        total_force_surge = thrust_surge + drag_surge
-        total_force_sway  = thrust_sway + drag_sway
-        total_force_heave = thrust_heave + drag_heave
-        total_torque_yaw   = thrust_yaw + drag_yaw
-        total_torque_pitch = thrust_pitch + drag_pitch
-        f_x_pitched = total_force_surge * cos_p - total_force_heave * sin_p
-        f_z_pitched = total_force_surge * sin_p + total_force_heave * cos_p
-        fx = f_x_pitched * cos_h - total_force_sway * sin_h
-        fy = f_x_pitched * sin_h + total_force_sway * cos_h
-        fz = f_z_pitched - self.netBuoyancyForce
-        ax = fx / self.subMass
-        ay = fy / self.subMass
-        az = fz / self.subMass
-        angular_accel_z = total_torque_yaw / self.subInertia_Z
-        angular_accel_y = total_torque_pitch / self.subInertia_Y
-        self.subPhysics.velocity_x += ax * dt
-        self.subPhysics.velocity_y += ay * dt
-        self.subPhysics.velocity_z += az * dt
-        self.subPhysics.angular_velocity_z += angular_accel_z * dt
-        self.subPhysics.angular_velocity_y += angular_accel_y * dt
-        imu_accel_surge = ax * cos_h + ay * sin_h
-        imu_accel_sway = -ax * sin_h + ay * cos_h
-        imu_accel_heave = az
-        self.last_imu_readings = MPU6050Readings(
-            accel_x=imu_accel_sway, accel_y=imu_accel_surge, accel_z=imu_accel_heave,
-            gyro_z=self.subPhysics.angular_velocity_z,
-            gyro_y=self.subPhysics.angular_velocity_y
-        )
-        prev = (self.subPhysics.x, self.subPhysics.y, self.subPhysics.z,
-                self.subPhysics.heading, self.subPhysics.pitch)
-        self.subPhysics.x += self.subPhysics.velocity_x * dt
-        self.subPhysics.y += self.subPhysics.velocity_y * dt
-        self.subPhysics.z += self.subPhysics.velocity_z * dt
-        self.subPhysics.heading = (self.subPhysics.heading + math.degrees(self.subPhysics.angular_velocity_z * dt)) % 360
-        self.subPhysics.pitch = (self.subPhysics.pitch + math.degrees(self.subPhysics.angular_velocity_y * dt))
-        self.subPhysics.pitch = np.clip(self.subPhysics.pitch, -90, 90)
-        margin = 0.5
-        self.subPhysics.x = np.clip(self.subPhysics.x, margin, self.config.worldWidth - margin)
-        self.subPhysics.y = np.clip(self.subPhysics.y, margin, self.config.worldHeight - margin)
-        self.subPhysics.z = np.clip(self.subPhysics.z, 0.0, self.config.worldDepth - 0.2)
-        self._resolveCollisions(prev, dt)
-        if self.prequal_gate:
-            crossing = check_gate_crossing(self.prequal_gate, prev[0], prev[1], prev[2],
-                                           self.subPhysics.x, self.subPhysics.y, self.subPhysics.z,
-                                           self.poleBottomZ)
-            if crossing:
-                if crossing.inside_opening: self.gatePasses += 1
-                where = "through the gate" if crossing.inside_opening else "outside the gate opening"
-                print(f"Gate plane crossed {'forward' if crossing.direction > 0 else 'backward'} {where} "
-                      f"(y={crossing.y:.2f}, z={crossing.z:.2f})")
-
-    def _resolveCollisions(self, prev, dt):
-        """ On contact, return the sub to its last clear pose and stop it. """
-        s = self.subPhysics
-        hit = find_collision(s.x, s.y, s.z, s.heading, self.config.submarineLength,
-                             self.config.submarineWidth, self.config.submarineHeight, self.obstacles)
-        clear_for = self.timeSinceContact
-        self.timeSinceContact = 0.0 if hit else self.timeSinceContact + dt
-        if hit:
-            # A new collision, unless it's the same contact bumping again within half a second
-            if clear_for > 0.5:
-                self.collisionCount += 1
-                print(f"Collision with {hit.name} at x={s.x:.2f}, y={s.y:.2f}, z={s.z:.2f}")
-            s.x, s.y, s.z, s.heading, s.pitch = prev
-            s.velocity_x = s.velocity_y = s.velocity_z = 0.0
-            s.angular_velocity_z = s.angular_velocity_y = 0.0
-        self.lastCollision = hit
 
     def project3D(self, world_pos: Tuple[float, float, float]) -> Optional[Tuple[int, int, float]]:
         # (Remains the same)
@@ -301,9 +163,9 @@ class SubmarineSimulator:
                f"Speed (XY): {speed:.2f} m/s", f"Vel Z: {self.subPhysics.velocity_z:.2f} m/s",
                f"Heading: {self.subPhysics.heading:.1f}°", f"Pitch: {self.subPhysics.pitch:.1f}°",
                f"Depth: {self.subPhysics.z:.2f} m",
-               f"Gate passes: {self.gatePasses}  Collisions: {self.collisionCount}"]
+               f"Gate passes: {self.core.gate_passes}  Collisions: {self.core.collision_count}"]
         for s in stats: self.screen.blit(self.smallFont.render(s,True,BLACK),(20,y)); y+=20
-        y+=10; imu = self.last_imu_readings
+        y+=10; imu = self.core.true_imu
         imu_stats=["IMU:",
                    f" Accel Y(surge): {imu.accel_y: .2f} m/s²",
                    f" Accel X(sway): {imu.accel_x: .2f} m/s²",
@@ -333,8 +195,7 @@ class SubmarineSimulator:
     def step(self, dt: float):
         """ One sense / think / move cycle, without drawing the main window. """
         if self.renderCamera: self.generateCameraView()
-        detections = self.detector.detect(self.subPhysics, dt) if self.detector else None
-        measured = self.sensorModel.read(self.subPhysics, self.last_imu_readings, dt)
+        measured, detections = self.core.sense(dt)
         sensors = SensorSuite(camera_image=self.cameraSurface, depth=measured.depth,
                               heading=measured.heading, pitch=measured.pitch,
                               imu=measured.imu, depth_rate=measured.depth_rate,
@@ -362,4 +223,4 @@ class SubmarineSimulator:
         if best_pole:
              pygame.draw.rect(self.cameraSurface, GREEN,
                               (best_pole['min_x'], best_pole['min_y'], best_pole['width'], best_pole['height']), 2 * self.overlayWidth)
-        self.applyPhysics(dt, thrusterCommands)
+        self.core.advance(dt, thrusterCommands)

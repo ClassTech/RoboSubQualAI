@@ -57,8 +57,9 @@ def summarize(name, values):
 
 def main():
     sim = SubmarineSimulator(Submarine(mission_plan=build_mission()), detector_mode="opencv")
-    cam, cfg = sim.cameraModel, sim.config
-    truth = DetectorModel(cam, sim.prequal_gate, sim.prequal_marker, sim.poleBottomZ,
+    core = sim.core
+    cam, cfg = core.camera, core.config
+    truth = DetectorModel(cam, core.gate, core.marker, core.pole_bottom_z,
                           cfg.gatePoleRadius, noisy=False)
     pole_info = {p.name: p for p in truth.poles}
 
@@ -71,7 +72,7 @@ def main():
 
     t, frames = 0.0, 0
     while t < MAX_SIM_SECONDS and sim.submarineAI.current_task_index < len(sim.submarineAI.mission_plan):
-        s = sim.subPhysics
+        s = core.state
         state = SubmarinePhysicsState(**vars(s))
         sim.step(DT)
         t += DT
@@ -111,8 +112,8 @@ def main():
             if l and r:
                 # Left pole in the world (lower y) appears on the right of the image when facing +x.
                 (lb, le), (rb, re) = sorted([l, r], key=lambda p: p[0]['center_x'])
-                g = estimate_gate(lb, rb, cam, sim.prequal_gate.width, le, re)
-                tb, tr = true_bearing_range(state, sim.prequal_gate.x, sim.prequal_gate.center_y)
+                g = estimate_gate(lb, rb, cam, core.gate.width, le, re)
+                tb, tr = true_bearing_range(state, core.gate.x, core.gate.center_y)
                 gate_bearing_err[source].append(g.bearing_deg - tb)
                 if g.range_m is not None:
                     gate_range_err[(source, g.method)].append((g.range_m - tr) / tr)
@@ -122,7 +123,7 @@ def main():
 
     done = sim.submarineAI.current_task_index >= len(sim.submarineAI.mission_plan)
     print(f"Mission {'completed' if done else 'DID NOT complete'} in {t:.1f} s sim time ({frames} frames). "
-          f"Gate passes: {sim.gatePasses}, collisions: {sim.collisionCount}\n")
+          f"Gate passes: {core.gate_passes}, collisions: {core.collision_count}\n")
 
     print("Box agreement, OpenCV minus simulated (pixels):")
     for name in pole_info:

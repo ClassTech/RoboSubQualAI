@@ -36,7 +36,7 @@ def run_once(detector: str, max_seconds: float, seed: int):
     done = ai.current_task_index >= len(ai.mission_plan)
     failed = "FAILED" in log.getvalue()
     last_task = "complete" if done else f"{ai.get_current_task_name()}/{ai.get_current_state_name()}"
-    return done and not failed and sim.gatePasses >= 2, t, sim.gatePasses, sim.collisionCount, last_task, log.getvalue()
+    return done and not failed and sim.core.gate_passes >= 2, t, sim.core.gate_passes, sim.core.collision_count, last_task, log.getvalue()
 
 
 def main():

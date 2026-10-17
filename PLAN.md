@@ -13,7 +13,9 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
 - Camera: 1280×960, 70° horizontal FOV. Objects are drawn at their real size (`camera_geometry.py`, shared by the renderer and the simulated detector).
 
 ## Phase 1: Simulator that runs without the display
-- [ ] Move the physics out of `SubmarineSimulator.applyPhysics()` into its own class with a fixed time step and no pygame. `main.py` keeps working on top of it and behaves the same.
+- [x] Move the physics out of `SubmarineSimulator.applyPhysics()` into its own class with a fixed time step and no pygame. `main.py` keeps working on top of it and behaves the same.
+  - `sim_core.SubSim` holds the course, physics (fixed `physicsDt`, 1/60 s), collisions, gate passes, sensors and simulated detector. It imports no pygame or OpenCV and runs about 3,000 10-Hz control steps per second on one core (~300× real time).
+  - Scripted mission with the noisy detector over 40 seeds: 35/40 and 37/40 for the old and new code, so behavior is unchanged. The earlier 20/20 was a lucky streak; the noisy baseline is about 90%.
 - [x] Fix yaw torque so it uses the thruster lever arm (it was in N, not N·m).
 - [x] Add pole collisions and a gate-pass check: the sub crosses the gate plane between the poles, at a valid depth. (`collision.py`)
 
@@ -33,7 +35,7 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
   - `Vision` holds a target for 0.5 s after a miss and only accepts one seen in 2 consecutive frames at about the same place.
   - "Until lost" subtasks only count a target as gone when it was close (gate) or at the image edge (sway), not after a mid-view dropout.
   - `DriveUntilTargetLost` steers at the gate while it's visible.
-  - Scripted mission, `tools/run_headless.py`: perfect detector 8/8. Noisy detector with clear-pool ranges 20/20 (2 runs had one recovered collision). With the earlier murky-water guess (6–10 m) it was about 4/12, because the gate is ~10–12 m from the marker.
+  - Scripted mission, `tools/run_headless.py`: perfect detector 8/8. Noisy detector with clear-pool ranges about 90% over 40 runs (see Phase 1). With the earlier murky-water guess (6–10 m) it was about 4/12, because the gate is ~10–12 m from the marker.
 
 ## Phase 4: Gymnasium environment for the gate task
 - [ ] **Observations:** depth, depth rate, heading, pitch, pitch rate, yaw rate, and per object found/bearing/range/confidence plus time since last seen. Add the last action and a few stacked past steps, because the gate drops out of view about 1.4 m before you pass it.
@@ -62,5 +64,4 @@ The display stays optional: training runs without a window, and the same physics
 - OpenCV mode at 1280×960 runs at roughly 20 fps on the iMac, so the graphics window is slower than before. The simulated detector is unaffected.
 - Should the policy control sway as well? The orbit task uses it, but the gate task doesn't need it. Leaning toward leaving it out for the gate task.
 - `subInertia_Z = 0.35` looks high. A solid 4 kg box of the sub's size would be about 0.14 kg·m², so the sim may turn slower than the real sub.
-- `sensor_model.py` imports `data_structures.py`, which imports pygame. Untangle this in the Phase 1 physics split.
 - `submarineHeight` (0.25 m) and `gatePoleRadius` (0.025 m) in `config.py` are guesses. Measure the real sub and gate.

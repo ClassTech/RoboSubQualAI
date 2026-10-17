@@ -6,6 +6,7 @@ including the Vision class which holds an image provider and analyzes on demand.
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Tuple, Any, Callable 
 from detector_model import Detections
+from core_types import MPU6050Readings, ThrusterCommands  # Re-exported for existing imports
 import pygame
 import numpy as np 
 # --- Import the blob finding function ---
@@ -14,14 +15,6 @@ from ai.vision import find_blobs_hsv
 # --- Import HSV Ranges (needed for thresholds potentially) ---
 from config import GREEN_HSV_RANGE, RED_HSV_RANGES, SimulationConfig 
 # ---
-
-@dataclass
-class MPU6050Readings:
-    accel_x: float = 0.0
-    accel_y: float = 0.0
-    accel_z: float = 0.0
-    gyro_y: float = 0.0  # Pitch rate
-    gyro_z: float = 0.0  # Yaw rate
 
 @dataclass
 class SensorSuite:
@@ -168,18 +161,3 @@ class Vision:
     def is_gate_visible(self) -> bool: return self.get_gate_pair() is not None
     def get_gate_center_x(self) -> Optional[float]:
         pair = self.get_gate_pair(); return (pair[0]['center_x'] + pair[1]['center_x']) / 2 if pair else None
-
-# --- UPDATED ThrusterCommands ---
-@dataclass
-class ThrusterCommands:
-    # Horizontal Vectored Thrusters (4 corners)
-    hfl: float = 0.0  # Horizontal Front-Left
-    hfr: float = 0.0  # Horizontal Front-Right
-    hal: float = 0.0  # Horizontal Aft-Left
-    har: float = 0.0  # Horizontal Aft-Right
-
-    # Vertical Thrusters (front and rear)
-    vf: float = 0.0   # Vertical Front
-    vr: float = 0.0   # Vertical Rear
-    
-    pause_simulation: bool = False

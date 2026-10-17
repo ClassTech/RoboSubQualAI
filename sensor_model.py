@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from config import SensorNoiseConfig
-from data_structures import MPU6050Readings
+from core_types import MPU6050Readings
 from world import SubmarinePhysicsState
 
 
