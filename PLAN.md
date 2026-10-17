@@ -36,6 +36,13 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
 - [ ] Turn on realism one layer at a time, retraining after each: detector noise, then a thruster model (deadband, forward/reverse asymmetry, battery sag, spin-up lag), then randomized PID gains.
 - [ ] Measure the policy's success rate against the scripted baseline in the same randomized environment.
 
+## Seeing what's going on
+The display stays optional: training runs without a window, and the same physics draws in the pygame window when you want to watch.
+- [ ] **Watch live:** `main.py` keeps running the scripted mission as now. A `watch.py` loads a trained policy and flies it in the pygame window in real time (`render_mode="human"`).
+- [ ] **Training curves:** log reward, gate-pass rate, collision rate and episode length to TensorBoard (add `tensorboard` to `requirements.txt`).
+- [ ] **Evaluation videos (later):** during training, periodically record a few runs flown by the current policy as short videos.
+- [ ] **Replays (later):** save each run's path (pose, detections, actions) and play it back in the pygame window with pause and single-step.
+
 ## Phase 6: Export to the Pi 5
 - [ ] Export the weights plus the `VecNormalize` statistics, and write a plain-numpy forward pass.
 - [ ] Check that the numpy policy and the PyTorch policy give the same outputs on recorded observations.
