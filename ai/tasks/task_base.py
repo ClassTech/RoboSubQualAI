@@ -57,23 +57,14 @@ class Task:
 
         processed_vision_data = vision_data
         current_subtask = self.subtasks[self.current_subtask_index]
+        self.context['search_direction'] = self.search_direction
+        self.context['search_turn_power'] = self.DEFAULT_SEARCH_TURN_POWER
 
         if not hasattr(current_subtask, '_has_entered'):
              current_subtask.on_enter(sub, sensors, processed_vision_data, self.context)
              current_subtask._has_entered = True
 
         subtask_status, commands = current_subtask.execute(sub, dt, sensors, processed_vision_data, config, self.context)
-
-        # --- Check class name string ---
-        if current_subtask.__class__.__name__ == 'WaitForTargetVisible' and subtask_status == SubtaskStatus.RUNNING:
-             if not (processed_vision_data.is_pole_visible() or processed_vision_data.is_gate_visible()):
-                 spin_yaw = self.DEFAULT_SEARCH_TURN_POWER * -self.search_direction
-                 commands.hfl += spin_yaw; commands.hfr -= spin_yaw;
-                 commands.hal += spin_yaw; commands.har -= spin_yaw;
-                 max_abs = max(1.0, abs(commands.hfl), abs(commands.hfr), abs(commands.hal), abs(commands.har))
-                 if max_abs > 1.0:
-                    commands.hfl /= max_abs; commands.hfr /= max_abs;
-                    commands.hal /= max_abs; commands.har /= max_abs;
 
         if subtask_status == SubtaskStatus.COMPLETED:
             current_subtask.on_exit(sub, sensors, processed_vision_data, self.context)

@@ -431,6 +431,12 @@ class DriveUntilTargetLost(Subtask):
         return SubtaskStatus.RUNNING, sub.get_heading_commands(sensors, self.heading_to_hold, surge, target_depth=self.target_depth)
 
 class WaitForTargetVisible(Subtask):
+    """
+    Turns in place, holding depth, until the target is visible. When waiting for
+    the gate and a single red pole is in view, turns toward that pole, since the
+    gate is probably on that side. Otherwise turns the task's search direction
+    (1 = right).
+    """
     def __init__(self, target_type='either'):
         self.target_type = target_type.lower(); self.target_depth: float = 0.1
     def on_enter(self, sub: 'Submarine', sensors: SensorSuite, vision_data: Vision, context: Dict[str, Any]):
@@ -441,7 +447,14 @@ class WaitForTargetVisible(Subtask):
         elif self.target_type == 'gate': visible = vision_data.is_gate_visible()
         else: visible = vision_data.is_pole_visible() or vision_data.is_gate_visible()
         if visible: return SubtaskStatus.COMPLETED, sub.get_spin_damping_commands(sensors, self.target_depth)
-        else: heave, pitch = sub.get_depth_pitch_commands(sensors, self.target_depth, 0.0); return SubtaskStatus.RUNNING, sub._mix_and_normalize_commands(0, 0, 0, heave, pitch)
+        power = context.get('search_turn_power', 0.25)
+        yaw = -power * context.get('search_direction', 1)   # Positive yaw turns left
+        if self.target_type in ('gate', 'either') and vision_data.red_blobs:
+            cam_w, _ = sensors.camera_image.get_size()
+            pole = max(vision_data.red_blobs, key=lambda b: b['area'])
+            yaw = power if pole['center_x'] < cam_w / 2 else -power
+        heave, pitch = sub.get_depth_pitch_commands(sensors, self.target_depth, 0.0)
+        return SubtaskStatus.RUNNING, sub._mix_and_normalize_commands(0, 0, yaw, heave, pitch)
 
 class AlignToObjectX(Subtask):
     def __init__(self, target_x_fraction: float, tolerance_fraction: float = 0.047, yaw_gain: float = 0.8, yaw_rate_tolerance: float = 0.05):

@@ -56,10 +56,10 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
 
     | Controller | Perfect detector | Noisy detector |
     |---|---|---|
-    | Scripted `GateTask` | 84% (8 timeouts) | 96% (2 timeouts) |
+    | Scripted `GateTask` | 100% (median 21.5 s) | 100% (median 21.7 s) |
     | Straight ahead at 1.5 m | 26% | 26% |
     | Random | 0% | 0% |
-  - The scripted task's timeouts are mostly in `WaitForTargetVisible`: it never turns to look for the gate, so it waits forever when a start leaves only one pole in view. It does better with noise only because a false box occasionally pairs with the visible pole and turns it toward the gate.
+  - `WaitForTargetVisible` now turns until its target is visible, toward a single visible red pole when waiting for the gate. Before, the scripted task scored 84% / 96%. Its search turn was a special case in `Task.execute` that seeing the distant green marker cancelled, so it sat still when a start left only one gate pole in view.
   - `GateEnv` passes Stable-Baselines3's `check_env`, imports no pygame or OpenCV, and runs ~1,200 steps/s on one core (~120× real time).
 
 ## Phase 5: Training on the iMac
@@ -80,7 +80,6 @@ The display stays optional: training runs without a window, and the same physics
 - [ ] Check that the numpy policy and the PyTorch policy give the same outputs on recorded observations.
 
 ## Open questions
-- Give the scripted `GateTask` a search (turn toward a single visible pole) so it's a fairer baseline from off-angle starts?
 - The simulated detector doesn't model occlusion (e.g. a gate pole in front of the marker).
 - OpenCV mode at 1280×960 runs at roughly 20 fps on the iMac, so the graphics window is slower than before. The simulated detector is unaffected.
 - Should the policy control sway as well? The orbit task uses it, but the gate task doesn't need it. Leaning toward leaving it out for the gate task.
