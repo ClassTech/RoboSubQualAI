@@ -14,7 +14,7 @@ Conventions:
 """
 import math
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional, Tuple
 
 
 @dataclass
@@ -104,3 +104,22 @@ def estimate_gate(left: dict, right: dict, cam: CameraModel, gate_width_m: float
     if half_angle <= 0:
         return Estimate(b, None, "none")
     return Estimate(b, (gate_width_m / 2) / math.tan(half_angle), "separation")
+
+
+def find_gate_pair(red_boxes: List[dict], image_height: int) -> Optional[Tuple[dict, dict]]:
+    """
+    Picks the two red boxes most likely to be the gate's poles: tall and thin,
+    side by side, overlapping vertically, with similar heights. Returns
+    (left box, right box) in image order, or None.
+    """
+    poles = sorted((b for b in red_boxes if b['height'] > b['width'] * 1.5), key=lambda b: b['center_x'])
+    # Thresholds were tuned in pixels on a 240-tall image.
+    min_overlap = image_height * 10 / 240
+    max_height_diff = image_height * 150 / 240
+    best, best_diff = None, float('inf')
+    for p1, p2 in zip(poles, poles[1:]):
+        height_diff = abs(p1['height'] - p2['height'])
+        y_overlap = min(p1['max_y'], p2['max_y']) - max(p1['min_y'], p2['min_y'])
+        if y_overlap > min_overlap and height_diff < max_height_diff and height_diff < best_diff:
+            best, best_diff = (p1, p2), height_diff
+    return best

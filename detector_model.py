@@ -5,7 +5,7 @@ report, straight from the sub's true pose and the camera geometry, in the same
 format as find_blobs_hsv(). This is much faster than rendering an image and
 running OpenCV on it, which matters for training.
 
-Noise, in order: box edge jitter, missed detections (range-dependent, plus
+Noise, in order: box position and size jitter, missed detections (range-dependent, plus
 dropouts that last a few frames), false positives, and latency. Each reset()
 draws new noise levels, so the policy sees a range of camera conditions.
 
@@ -80,8 +80,8 @@ class DetectorModel:
     def reset(self):
         n, r = self.noise_cfg, self.rng
         self.px_scale = self.cam.width / REFERENCE_WIDTH_PX
-        self.edge_px = r.uniform(*n.edgeJitterPx) * self.px_scale
-        self.edge_frac = r.uniform(*n.edgeJitterFrac)
+        self.center_px = r.uniform(*n.centerJitterPx) * self.px_scale
+        self.size_frac = r.uniform(*n.sizeJitterFrac)
         self.dropout_rate = r.uniform(*n.dropoutRatePerSec)
         self.clear_range = r.uniform(*n.clearRange)
         self.max_range = max(self.clear_range + 0.1, r.uniform(*n.maxRange))
@@ -107,11 +107,13 @@ class DetectorModel:
 
     # --- Noise ---
     def _jitter(self, box: Dict) -> Optional[Dict]:
+        """Shifts the box center and scales its size, so thin poles stay thin but present."""
         g = self.rng.gauss
-        sx = self.edge_px + self.edge_frac * box['width']
-        sy = self.edge_px + self.edge_frac * box['height']
-        min_x, max_x = box['min_x'] + g(0, sx), box['max_x'] + g(0, sx)
-        min_y, max_y = box['min_y'] + g(0, sy), box['max_y'] + g(0, sy)
+        cx = (box['min_x'] + box['max_x']) / 2 + g(0, self.center_px)
+        cy = (box['min_y'] + box['max_y']) / 2 + g(0, self.center_px)
+        half_w = max(0.5, box['width'] * (1 + g(0, self.size_frac)) / 2)
+        half_h = max(0.5, box['height'] * (1 + g(0, self.size_frac)) / 2)
+        min_x, max_x, min_y, max_y = cx - half_w, cx + half_w, cy - half_h, cy + half_h
         w, h = self.cam.width, self.cam.height
         min_x, max_x = max(0.0, min_x), min(float(w), max_x)
         min_y, max_y = max(0.0, min_y), min(float(h), max_y)

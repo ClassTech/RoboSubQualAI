@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Tuple, Any, Callable 
 from detector_model import Detections
 from core_types import MPU6050Readings, ThrusterCommands  # Re-exported for existing imports
+from perception import find_gate_pair
 import pygame
 import numpy as np 
 # --- Import the blob finding function ---
@@ -127,22 +128,7 @@ class Vision:
         return max(potential_poles, key=lambda b: b['area']) if potential_poles else None
 
     def _find_gate_pair(self) -> Optional[Tuple[Dict, Dict]]:
-        potential_poles = [b for b in self.red_blobs if b['height'] > b['width'] * 1.5] 
-        if len(potential_poles) < 2: return None
-        # Thresholds were tuned in pixels on a 240-tall image.
-        min_overlap = self.image_height * 10 / 240
-        max_height_diff = self.image_height * 150 / 240
-        potential_poles.sort(key=lambda p: p['center_x'])
-        best_pair_found, min_height_diff = None, float('inf')
-        for i in range(len(potential_poles) - 1):
-            p1, p2 = potential_poles[i], potential_poles[i+1]
-            height_diff = abs(p1['height'] - p2['height'])
-            y_overlap = min(p1['max_y'], p2['max_y']) - max(p1['min_y'], p2['min_y'])
-            if y_overlap > min_overlap and height_diff < max_height_diff: 
-                 if height_diff < min_height_diff:
-                     min_height_diff = height_diff
-                     best_pair_found = (p1, p2)
-        return best_pair_found
+        return find_gate_pair(self.red_blobs, self.image_height)
 
     # --- Methods for Green Pole (Marker), with hold ---
     def get_best_pole(self) -> Optional[Dict]:

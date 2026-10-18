@@ -39,7 +39,11 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
   - Scripted mission, `tools/run_headless.py`: perfect detector 8/8. Noisy detector with clear-pool ranges about 90% over 40 runs (see Phase 1). With the earlier murky-water guess (6–10 m) it was about 4/12, because the gate is ~10–12 m from the marker.
 
 ## Phase 4: Gymnasium environment for the gate task
-- [ ] **Observations:** depth, depth rate, heading, pitch, pitch rate, yaw rate, and per object found/bearing/range/confidence plus time since last seen. Add the last action and a few stacked past steps, because the gate drops out of view about 1.4 m before you pass it.
+- [x] **Observations:** depth, depth rate, heading, pitch, pitch rate, yaw rate, and per object found/bearing/range/confidence plus time since last seen. Add the last action and a few stacked past steps, because the gate drops out of view about 1.4 m before you pass it.
+  - `observation.py` (numpy + stdlib, shared with the Pi): 20 values per frame × 4 stacked frames = 80. Own state: depth, depth rate, sin/cos of heading relative to the start heading (so the policy can't memorize the course's compass direction), pitch, pitch rate, yaw rate. Objects: the gate (red pole pair) and the most prominent single red pole, each with found, bearing, range, range confidence (from the estimation method) and time since seen. Unseen objects keep their last bearing, corrected for turning, and range. Then the last action.
+  - Gate pairing moved into `perception.find_gate_pair()`, used by both `Vision` and the observation.
+  - `tools/check_observation.py`: with the noisy detector, gate bearing is within 0.3° median and range within 4.5% median. Range error comes mostly from the pressure sensor's ±2 cm zero error.
+  - Fixed the detector's box noise. It moved each edge independently, which made thin, far poles vanish (the gate pair was found in only 39% of in-view frames). It now shifts the center and scales the size: 81%, with the rest from dropouts. Baseline still 40/40.
 - [ ] **Actions:** heading setpoint, depth setpoint and open-loop surge power. There's no speed setpoint, because the sub can't measure speed.
 - [ ] **Reward:** progress toward the gate, a bonus for passing through, and penalties for collisions, timeouts and energy use.
 - [ ] Use a perfect detector at first, and run the scripted `GateTask` through the environment as a baseline before any training.

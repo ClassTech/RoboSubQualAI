@@ -87,8 +87,8 @@ class SensorNoiseConfig:
 # Ranges are (min, max), drawn uniformly per episode at reset.
 @dataclass
 class DetectorNoiseConfig:
-    edgeJitterPx: Tuple[float, float] = (0.5, 2.0)        # Per-edge noise, fixed part (px at 320 wide; scales)
-    edgeJitterFrac: Tuple[float, float] = (0.01, 0.05)    # Per-edge noise, fraction of box size
+    centerJitterPx: Tuple[float, float] = (0.5, 2.0)      # Box center noise (px at 320 wide; scales with resolution)
+    sizeJitterFrac: Tuple[float, float] = (0.02, 0.10)    # Box width/height noise, fraction of its size
     dropoutRatePerSec: Tuple[float, float] = (0.0, 0.5)   # How often an object starts being missed
     dropoutMeanSec: float = 0.3                           # Mean length of a miss
     clearRange: Tuple[float, float] = (25.0, 35.0)        # Water clarity: detection is reliable inside this (m). Pool is very clear.
