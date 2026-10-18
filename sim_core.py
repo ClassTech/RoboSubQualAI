@@ -76,6 +76,7 @@ class SubSim:
         self.time = 0.0
         self._accumulator = 0.0
         self.gate_passes = 0
+        self.crossings = []          # Every GateCrossing of the gate plane, in order
         self.collision_count = 0
         self.last_collision = None
         self._time_since_contact = float('inf')
@@ -83,8 +84,16 @@ class SubSim:
     # --- Sensing ---
     def sense(self, dt: float) -> Tuple[SensorReadings, Optional[Detections]]:
         """What the sub's sensors and (simulated) detector report now. dt: time since last call."""
-        detections = self.detector.detect(self.state, dt) if self.detector else None
-        return self.sensors.read(self.state, self.true_imu, dt), detections
+        detections = self.detect(dt)
+        return self.read_sensors(dt), detections
+
+    def read_sensors(self, dt: float) -> SensorReadings:
+        """Pressure sensor, magnetometer and IMU readings. dt: time since the last reading."""
+        return self.sensors.read(self.state, self.true_imu, dt)
+
+    def detect(self, dt: float) -> Optional[Detections]:
+        """The simulated detector's boxes, or None if there is none. dt: time since the last call."""
+        return self.detector.detect(self.state, dt) if self.detector else None
 
     # --- Time ---
     def advance(self, dt: float, commands: ThrusterCommands):
@@ -156,6 +165,7 @@ class SubSim:
         self._resolve_collisions(prev, dt)
         crossing = check_gate_crossing(self.gate, prev[0], prev[1], prev[2], s.x, s.y, s.z, self.pole_bottom_z)
         if crossing:
+            self.crossings.append(crossing)
             if crossing.inside_opening:
                 self.gate_passes += 1
             where = "through the gate" if crossing.inside_opening else "outside the gate opening"

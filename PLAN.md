@@ -44,9 +44,23 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
   - Gate pairing moved into `perception.find_gate_pair()`, used by both `Vision` and the observation.
   - `tools/check_observation.py`: with the noisy detector, gate bearing is within 0.3° median and range within 4.5% median. Range error comes mostly from the pressure sensor's ±2 cm zero error.
   - Fixed the detector's box noise. It moved each edge independently, which made thin, far poles vanish (the gate pair was found in only 39% of in-view frames). It now shifts the center and scales the size: 81%, with the rest from dropouts. Baseline still 40/40.
-- [ ] **Actions:** heading setpoint, depth setpoint and open-loop surge power. There's no speed setpoint, because the sub can't measure speed.
-- [ ] **Reward:** progress toward the gate, a bonus for passing through, and penalties for collisions, timeouts and energy use.
-- [ ] Use a perfect detector at first, and run the scripted `GateTask` through the environment as a baseline before any training.
+- [x] **Actions:** heading setpoint, depth setpoint and open-loop surge power. There's no speed setpoint, because the sub can't measure speed.
+  - `gate_env.py`, 10 Hz: heading change of up to ±45° from the current heading, target depth 0.3–1.9 m, surge effort −1..1. The sub's own loops hold the targets at the physics rate in between.
+  - The PID loops and thruster mixer moved into `controller.py` (shared with the Pi). The scripted tasks use it too, unchanged (still 40/40).
+- [x] **Reward:** progress toward the gate, a bonus for passing through, and penalties for collisions, timeouts and energy use.
+  - Per step: +1 per meter closer to the gate center (horizontal distance plus depth error from 1.5 m), −0.01 time cost, −0.05 per second of full thrust. On ending: +10 through the gate, −5 for a collision, −5 for crossing the gate line outside the opening. Timeout at 60 s.
+  - Episodes start 3–8 m in front of the gate, ±1.5 m off center, ±30° off heading, 0.1–0.5 m deep.
+  - At the end of each episode, `info` reports is_success, collision, missed_gate, timeout, time_s and energy, for TensorBoard.
+- [x] Use a perfect detector at first, and run the scripted `GateTask` through the environment as a baseline before any training.
+  - `tools/eval_gate.py <scripted|straight|random|model.zip>` scores a controller on fixed seeds (10000+, kept apart from training). On 50 episodes:
+
+    | Controller | Perfect detector | Noisy detector |
+    |---|---|---|
+    | Scripted `GateTask` | 84% (8 timeouts) | 96% (2 timeouts) |
+    | Straight ahead at 1.5 m | 26% | 26% |
+    | Random | 0% | 0% |
+  - The scripted task's timeouts are mostly in `WaitForTargetVisible`: it never turns to look for the gate, so it waits forever when a start leaves only one pole in view. It does better with noise only because a false box occasionally pairs with the visible pole and turns it toward the gate.
+  - `GateEnv` passes Stable-Baselines3's `check_env`, imports no pygame or OpenCV, and runs ~1,200 steps/s on one core (~120× real time).
 
 ## Phase 5: Training on the iMac
 - [ ] PPO in Stable-Baselines3 with about 8–10 parallel environments and `VecNormalize`.
@@ -56,7 +70,8 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
 ## Seeing what's going on
 The display stays optional: training runs without a window, and the same physics draws in the pygame window when you want to watch.
 - [ ] **Watch live:** `main.py` keeps running the scripted mission as now. A `watch.py` loads a trained policy and flies it in the pygame window in real time (`render_mode="human"`).
-- [ ] **Training curves:** log reward, gate-pass rate, collision rate and episode length to TensorBoard (add `tensorboard` to `requirements.txt`).
+- [ ] **Training curves:** log reward, gate-pass rate, collision rate and episode length to TensorBoard (add `tensorboard` to `requirements.txt`). The env already reports the outcomes in `info`.
+- [ ] **Scored tests during training:** every N steps, fly the current policy deterministically on fixed seeds with `tools/eval_gate.py`'s scoring, plot its success rate against the scripted baseline, and keep the best checkpoint.
 - [ ] **Evaluation videos (later):** during training, periodically record a few runs flown by the current policy as short videos.
 - [ ] **Replays (later):** save each run's path (pose, detections, actions) and play it back in the pygame window with pause and single-step.
 
@@ -65,6 +80,7 @@ The display stays optional: training runs without a window, and the same physics
 - [ ] Check that the numpy policy and the PyTorch policy give the same outputs on recorded observations.
 
 ## Open questions
+- Give the scripted `GateTask` a search (turn toward a single visible pole) so it's a fairer baseline from off-angle starts?
 - The simulated detector doesn't model occlusion (e.g. a gate pole in front of the marker).
 - OpenCV mode at 1280×960 runs at roughly 20 fps on the iMac, so the graphics window is slower than before. The simulated detector is unaffected.
 - Should the policy control sway as well? The orbit task uses it, but the gate task doesn't need it. Leaning toward leaving it out for the gate task.

@@ -11,6 +11,7 @@ from data_structures import ThrusterCommands, SensorSuite, Vision
 # ---
 from config import SimulationConfig
 from utils import angle_diff
+from controller import ControllerGains, depth_pitch_efforts, yaw_effort, mix
 from ai.tasks import TaskStatus # Corrected import
 from ai.tasks.task_base import Task
 
@@ -159,19 +160,14 @@ class Submarine:
         Calculates heave (vertical) and pitch commands using PID for depth.
         Returns: (heave_command, pitch_command)
         """
-        depth_error = target_depth - sensors.depth
-        
-        heave_p = depth_error * self.DEPTH_P_GAIN
-        heave_i = self.integral_z_err * self.DEPTH_I_GAIN 
-        heave_d = -sensors.depth_rate * self.DEPTH_D_GAIN
-        heave_cmd = np.clip(heave_p + heave_i + heave_d, -1.0, 1.0)
-        
-        pitch_error = angle_diff(target_pitch, sensors.pitch)
-        pitch_p = pitch_error * self.PITCH_P_GAIN
-        pitch_d = -sensors.imu.gyro_y * self.PITCH_D_GAIN 
-        pitch_cmd = np.clip(pitch_p + pitch_d, -1.0, 1.0)
-        
-        return heave_cmd, pitch_cmd
+        return depth_pitch_efforts(self.gains(), sensors.depth, sensors.depth_rate, self.integral_z_err,
+                                   target_depth, sensors.pitch, sensors.imu.gyro_y, target_pitch)
+
+    def gains(self) -> ControllerGains:
+        """This sub's gains in the shared controller's form."""
+        return ControllerGains(depth_p=self.DEPTH_P_GAIN, depth_i=self.DEPTH_I_GAIN, depth_d=self.DEPTH_D_GAIN,
+                               depth_i_clamp=self.integral_clamp_z, pitch_p=self.PITCH_P_GAIN,
+                               pitch_d=self.PITCH_D_GAIN, heading_p=self.HOVER_YAW_P_GAIN, yaw_d=self.YAW_D_GAIN)
 
     def _get_damping_commands(self, sensors: SensorSuite) -> ThrusterCommands:
         """Fully damps all 6 axes of motion.
@@ -210,11 +206,7 @@ class Submarine:
         Uses only measured values, so the policy can drive the real sub through it."""
         target_depth = target_depth if target_depth is not None else self.target_depth
 
-        # Yaw Control
-        yaw_err = angle_diff(heading, sensors.heading)
-        yaw_p = yaw_err * self.HOVER_YAW_P_GAIN
-        yaw_d = -sensors.imu.gyro_z * self.YAW_D_GAIN 
-        yaw = np.clip(yaw_p + yaw_d, -1.0, 1.0)
+        yaw = yaw_effort(self.gains(), sensors.heading, sensors.imu.gyro_z, heading)
         
         # Open-loop sway: the real sub can't measure sway velocity to damp it.
         sway = np.clip(sway_power, -1.0, 1.0)
@@ -269,33 +261,5 @@ class Submarine:
         return self._mix_and_normalize_commands(surge_power, 0.0, yaw, heave, pitch)
 
     def _mix_and_normalize_commands(self, surge, sway, yaw, heave, pitch) -> ThrusterCommands:
-        """
-        Mixes 5-axis commands into 6 thruster commands.
-        """
-        commands = ThrusterCommands()
-        cos_45 = 0.7071 
-        surge_cmd = surge * cos_45
-        sway_cmd  = sway * cos_45
-        
-        commands.hfl = surge_cmd + sway_cmd + yaw
-        commands.hfr = surge_cmd - sway_cmd - yaw
-        commands.hal = surge_cmd - sway_cmd + yaw
-        commands.har = surge_cmd + sway_cmd - yaw
-
-        commands.vf = heave + pitch
-        commands.vr = heave - pitch
-
-        max_abs = max(1.0, 
-                      abs(commands.hfl), abs(commands.hfr),
-                      abs(commands.hal), abs(commands.har),
-                      abs(commands.vf), abs(commands.vr))
-
-        if max_abs > 1.0:
-            commands.hfl /= max_abs
-            commands.hfr /= max_abs
-            commands.hal /= max_abs
-            commands.har /= max_abs
-            commands.vf /= max_abs
-            commands.vr /= max_abs
-
-        return commands
+        """Mixes 5-axis commands into 6 thruster commands (shared controller.mix)."""
+        return mix(surge, sway, yaw, heave, pitch)
