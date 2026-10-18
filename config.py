@@ -38,8 +38,9 @@ class SimulationConfig:
     cameraHeight: int = 960
     submarineWidth: float = 0.46
     submarineLength: float = 0.457
-    submarineHeight: float = 0.25 # Collision box height (m) - ASSUMED, TUNE ME
-    gatePoleRadius: float = 0.025 # ~2in PVC - ASSUMED, TUNE ME
+    submarineHeight: float = 0.25 # Collision box height (m)
+    gatePoleRadius: float = 0.0167 # 1in PVC: 1.315in (33.4mm) outside diameter
+    thrusterArm: float = 0.2286 # Thrusters are mounted 9in from the sub's center (yaw and pitch lever arm, m)
 
     # --- NEW 3D Physics Properties ---
     subMass: float = 4.0        # Mass (kg) 

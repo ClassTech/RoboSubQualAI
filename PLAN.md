@@ -10,6 +10,7 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
 - PID gains get tuned in the pool, so training randomizes them.
 - Development and training run on the iMac: Python 3.12 `.venv`, torch 2.2.2 (see `requirements.txt`).
 - The pool is very clear: detection is easy at 25 m (`DetectorNoiseConfig.clearRange` 25–35 m, `maxRange` 35–50 m).
+- Measured: gate poles are 1" PVC (33.4 mm OD), the sub is 0.25 m tall, and the thrusters are 9" (0.229 m) from center. Scripted noisy baseline with these values: 36/40.
 - Camera: 1280×960, 70° horizontal FOV. Objects are drawn at their real size (`camera_geometry.py`, shared by the renderer and the simulated detector).
 
 ## Phase 1: Simulator that runs without the display
@@ -64,4 +65,3 @@ The display stays optional: training runs without a window, and the same physics
 - OpenCV mode at 1280×960 runs at roughly 20 fps on the iMac, so the graphics window is slower than before. The simulated detector is unaffected.
 - Should the policy control sway as well? The orbit task uses it, but the gate task doesn't need it. Leaning toward leaving it out for the gate task.
 - `subInertia_Z = 0.35` looks high. A solid 4 kg box of the sub's size would be about 0.14 kg·m², so the sim may turn slower than the real sub.
-- `submarineHeight` (0.25 m) and `gatePoleRadius` (0.025 m) in `config.py` are guesses. Measure the real sub and gate.

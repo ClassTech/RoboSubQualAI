@@ -44,9 +44,9 @@ class SubSim:
         self.camera = CameraModel(c.cameraWidth, c.cameraHeight, c.cameraFov)
         self.pole_bottom_z = c.worldDepth - 0.01
         self.net_buoyancy = c.subVolume * c.waterDensity * c.gravity - c.subMass * c.gravity
-        # Corner thrusters are angled 45 deg so their thrust lines miss the center.
-        # Perpendicular distance from the center to each thrust line:
-        self.yaw_lever_arm = 0.7071 * (c.submarineLength / 2 + c.submarineWidth / 2)
+        # Corner thrusters push at right angles to the line from the center,
+        # so their yaw lever arm is their distance from the center.
+        self.yaw_lever_arm = c.thrusterArm
 
         self.sensors = SensorModel(rng=random.Random(self.rng.random()))
         self.reset()
@@ -106,7 +106,7 @@ class SubSim:
         thrust_sway = (f_hfl - f_hfr - f_hal + f_har) * cos_45
         thrust_heave = f_vf + f_vr
         thrust_yaw = (f_hfl - f_hfr + f_hal - f_har) * self.yaw_lever_arm
-        thrust_pitch = (f_vf - f_vr) * c.submarineLength / 2
+        thrust_pitch = (f_vf - f_vr) * c.thrusterArm
 
         h_rad, p_rad = math.radians(s.heading), math.radians(s.pitch)
         cos_h, sin_h = math.cos(h_rad), math.sin(h_rad)
