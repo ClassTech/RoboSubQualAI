@@ -123,3 +123,38 @@ def find_gate_pair(red_boxes: List[dict], image_height: int) -> Optional[Tuple[d
         if y_overlap > min_overlap and height_diff < max_height_diff and height_diff < best_diff:
             best, best_diff = (p1, p2), height_diff
     return best
+
+
+@dataclass
+class GateGeometry:
+    bearing_deg: float        # To the gate's center (+ = left)
+    range_m: float            # To the gate's center
+    approach_deg: float       # Turn needed to face straight through the gate (+ = left)
+    offset_m: float           # Sideways distance from the gate's center line (+ = sub is left of it)
+
+
+def gate_geometry(left_est: Estimate, right_est: Estimate) -> Optional[GateGeometry]:
+    """
+    Where the gate is and how it's oriented, from the two poles' bearings and
+    ranges (left/right as seen in the image). None unless both have a range.
+    Positions are in the sub's frame: x forward, y left.
+    """
+    if left_est.range_m is None or right_est.range_m is None:
+        return None
+    pts = []
+    for est in (left_est, right_est):
+        a = math.radians(est.bearing_deg)
+        pts.append((est.range_m * math.cos(a), est.range_m * math.sin(a)))
+    (lx, ly), (rx, ry) = pts
+    cx, cy = (lx + rx) / 2, (ly + ry) / 2
+    ux, uy = lx - rx, ly - ry                    # Along the gate, right pole to left pole
+    length = math.hypot(ux, uy)
+    if length < 1e-6:
+        return None
+    ux, uy = ux / length, uy / length
+    nx, ny = uy, -ux                             # Normal to the gate line...
+    if nx * cx + ny * cy < 0:                    # ...pointing away from the sub, through the gate
+        nx, ny = -nx, -ny
+    return GateGeometry(bearing_deg=math.degrees(math.atan2(cy, cx)), range_m=math.hypot(cx, cy),
+                        approach_deg=math.degrees(math.atan2(ny, nx)),
+                        offset_m=-(cx * ux + cy * uy))

@@ -44,8 +44,9 @@ class StartConfig:
 
 @dataclass
 class RewardConfig:
-    progress: float = 1.0          # Per meter closer to the gate center (horizontal + depth)
+    progress: float = 1.0          # Per meter closer to the gate center (horizontal + depth + center line)
     depth_weight: float = 1.0      # How much depth error counts in that distance
+    center_line_weight: float = 0.5  # How much distance from the gate's center line counts
     target_depth_m: float = 1.5    # Middle of the usable gate opening
     gate_bonus: float = 10.0
     collision_penalty: float = 5.0
@@ -163,10 +164,12 @@ class GateEnv(gym.Env):
 
     # --- Helpers ---
     def _potential(self) -> float:
-        """Minus the distance to the gate center (horizontal, plus weighted depth error). Ground truth."""
+        """Minus the distance to the gate center (horizontal, plus weighted depth error and distance
+        from the gate's center line, so approaching square-on pays). Ground truth."""
         s, g, rc = self.core.state, self.core.gate, self.reward_cfg
         horizontal = float(np.hypot(g.x - s.x, g.center_y - s.y))
-        return -(horizontal + rc.depth_weight * abs(s.z - rc.target_depth_m))
+        return -(horizontal + rc.depth_weight * abs(s.z - rc.target_depth_m)
+                 + rc.center_line_weight * abs(s.y - g.center_y))
 
     def _observe(self) -> np.ndarray:
         r = self.readings

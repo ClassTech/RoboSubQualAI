@@ -42,8 +42,9 @@ def build_obstacles(gate: Optional[PrequalGate], marker: Optional[PrequalMarker]
         half_w = gate.width / 2
         left = (gate.x, gate.center_y - half_w)
         right = (gate.x, gate.center_y + half_w)
-        obstacles.append(Obstacle("gate left pole", left, left, gate.z_top, pole_bottom_z, gate_pole_radius))
-        obstacles.append(Obstacle("gate right pole", right, right, gate.z_top, pole_bottom_z, gate_pole_radius))
+        # Named as seen from the start side, facing +x: the +y pole is on the left.
+        obstacles.append(Obstacle("gate right pole", left, left, gate.z_top, pole_bottom_z, gate_pole_radius))
+        obstacles.append(Obstacle("gate left pole", right, right, gate.z_top, pole_bottom_z, gate_pole_radius))
         obstacles.append(Obstacle("gate top bar", left, right, gate.z_top, gate.z_top, gate_pole_radius))
     if marker:
         p = (marker.x, marker.y)

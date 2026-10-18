@@ -148,7 +148,8 @@ def main():
     parser.add_argument("--name", default="gate", help="Run directory name under runs/")
     parser.add_argument("--detector", choices=["perfect", "noisy"], default="perfect")
     parser.add_argument("--steps", type=float, default=3e6, help="Total environment steps (10 per simulated second)")
-    parser.add_argument("--envs", type=int, default=8, help="Parallel environments")
+    parser.add_argument("--envs", type=int, default=16, help="Parallel environments")
+    parser.add_argument("--threads", type=int, default=2, help="PyTorch threads for the PPO update")
     parser.add_argument("--eval-every", type=int, default=100_000)
     parser.add_argument("--eval-episodes", type=int, default=30)
     parser.add_argument("--seed", type=int, default=0)
@@ -156,12 +157,13 @@ def main():
 
     run_dir = os.path.join("runs", args.name)
     os.makedirs(run_dir, exist_ok=True)
-    hyper = dict(n_steps=1024, batch_size=256, n_epochs=10, gamma=0.995, gae_lambda=0.95,
+    # Each update uses 8192 steps however many environments collect them
+    hyper = dict(n_steps=max(64, 8192 // args.envs), batch_size=256, n_epochs=10, gamma=0.995, gae_lambda=0.95,
                  learning_rate=3e-4, clip_range=0.2, ent_coef=0.005,
                  policy_kwargs=dict(net_arch=[128, 128]))
     with open(os.path.join(run_dir, "config.json"), "w") as f:
         json.dump({**vars(args), "ppo": hyper}, f, indent=2)
-    torch.set_num_threads(2)
+    torch.set_num_threads(args.threads)
 
     print("Scoring the scripted baseline on the evaluation starts...", flush=True)
     baseline = score(GateEnv(detector_mode=args.detector), make_controller("scripted"), args.eval_episodes)

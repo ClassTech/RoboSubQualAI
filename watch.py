@@ -75,17 +75,27 @@ class Viewer:
         rel_heading = (r.heading - env.builder.start_heading + 180) % 360 - 180 if env.builder.start_heading is not None else 0.0
         lines += [f"Sub: depth {r.depth:.2f} m, heading {rel_heading:+.0f} deg from start, pitch {r.pitch:+.1f} deg",
                   ""]
-        track = env.builder.tracks["gate"]
+        b = env.builder
+        facing_plus_x = s.x < g.x
+        side = 1 if facing_plus_x else -1
         dx, dy = g.x - s.x, g.center_y - s.y
         true_bearing = (math.degrees(math.atan2(dy, dx)) - s.heading + 180) % 360 - 180
-        if not track.seen_ever:
+        true_approach = ((0.0 if facing_plus_x else 180.0) - s.heading + 180) % 360 - 180
+        true_offset = side * (s.y - g.center_y)
+        poles = "  ".join(f"{name} pole: {'in view' if t.found else ('remembered' if t.seen_ever else 'not seen')}"
+                          for name, t in (("Left", b.left), ("Right", b.right)))
+        lines.append(poles)
+        if not b.gate.seen_ever:
             lines.append("Gate: not seen yet")
         else:
-            seen = "in view" if track.found else f"remembered, last seen {track.unseen:.1f} s ago"
-            believed = (track.abs_bearing - r.heading + 180) % 360 - 180
+            seen = "in view" if b.gate.found else f"remembered, last seen {b.gate.unseen:.1f} s ago"
             lines += [f"Gate: {seen}",
-                      f"  believes  bearing {believed:+6.1f} deg, range {track.range_m:5.2f} m (confidence {track.confidence:.1f})"]
+                      f"  believes  bearing {b.gate.bearing(r.heading):+6.1f} deg, range {b.gate.range_m:5.2f} m"]
+            if b.gate.geometry_known:
+                approach = (b.gate.abs_approach - r.heading + 180) % 360 - 180
+                lines.append(f"            square-on turn {approach:+6.1f} deg, off center line {b.gate.offset_m:+5.2f} m")
         lines += [f"  truth     bearing {true_bearing:+6.1f} deg, range {math.hypot(dx, dy):5.2f} m",
+                  f"            square-on turn {true_approach:+6.1f} deg, off center line {true_offset:+5.2f} m",
                   "",
                   f"Last episode: {self.last_outcome or '-'}",
                   "Totals: " + ", ".join(f"{OUTCOME_NAMES[k].lower()} {v}" for k, v in self.tally.items())]
