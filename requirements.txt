@@ -5,3 +5,6 @@ stable-baselines3==2.4.1
 gymnasium==1.0.0
 pygame==2.6.1
 opencv-python==4.10.0.84
+tensorboard==2.18.0
+protobuf==5.29.3       # protobuf 6+ is newer than tensorboard 2.18 was tested with
+setuptools==75.8.0     # tensorboard 2.18 still imports pkg_resources, removed in newer setuptools

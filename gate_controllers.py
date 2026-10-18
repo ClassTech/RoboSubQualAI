@@ -9,8 +9,13 @@ Controllers that can fly the gate environment, shared by tools/eval_gate.py
 
 Each controller's step(env, obs) advances the environment one control period
 and returns what env.step() returns.
+
+A PPO model "<name>.zip" is used with the observation normalization saved next
+to it as "<name>_vecnormalize.pkl", if present.
 """
 import io
+import os
+import pickle
 from contextlib import redirect_stdout
 
 import numpy as np
@@ -67,6 +72,31 @@ class ScriptedController:
         return env.step_with_driver(driver)
 
 
+def run_episode(env: GateEnv, controller, seed: int):
+    """Flies one episode. Returns the final info and the total reward."""
+    obs, _ = env.reset(seed=seed)
+    controller.reset(env)
+    total = 0.0
+    while True:
+        obs, reward, term, trunc, info = controller.step(env, obs)
+        total += reward
+        if term or trunc:
+            return info, total
+
+
+def vecnormalize_path(model_path: str) -> str:
+    return model_path[:-len(".zip")] + "_vecnormalize.pkl" if model_path.endswith(".zip") else model_path + "_vecnormalize.pkl"
+
+
+def policy_controller(model, normalizer=None, name: str = "policy") -> ActionController:
+    """A trained model as a controller. normalizer: a VecNormalize whose stats the model was trained with."""
+    def choose(obs):
+        if normalizer is not None:
+            obs = normalizer.normalize_obs(obs)
+        return model.predict(obs, deterministic=True)[0]
+    return ActionController(name, choose)
+
+
 def make_controller(name: str, seed: int = 0):
     if name == "scripted":
         return ScriptedController()
@@ -77,5 +107,9 @@ def make_controller(name: str, seed: int = 0):
         depth_action = (1.5 - DEPTH_MIN) / (DEPTH_MAX - DEPTH_MIN) * 2 - 1   # Target 1.5 m
         return ActionController("straight", lambda obs: np.array([0.0, depth_action, 0.6]))
     from stable_baselines3 import PPO
-    model = PPO.load(name)
-    return ActionController(name, lambda obs: model.predict(obs, deterministic=True)[0])
+    model = PPO.load(name, device="cpu")
+    normalizer = None
+    if os.path.exists(vecnormalize_path(name)):
+        with open(vecnormalize_path(name), "rb") as f:
+            normalizer = pickle.load(f)
+    return policy_controller(model, normalizer, name)

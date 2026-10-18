@@ -18,22 +18,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gate_controllers import make_controller           # noqa: E402
+from gate_controllers import make_controller, run_episode  # noqa: E402
 from gate_env import GateEnv                            # noqa: E402
 
 OUTCOMES = ("is_success", "collision", "missed_gate", "timeout")
-
-
-def run_episode(env: GateEnv, controller, seed: int):
-    """Flies one episode. Returns the final info and the total reward."""
-    obs, _ = env.reset(seed=seed)
-    controller.reset(env)
-    total = 0.0
-    while True:
-        obs, reward, term, trunc, info = controller.step(env, obs)
-        total += reward
-        if term or trunc:
-            return info, total
 
 
 def main():

@@ -64,6 +64,8 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
 
 ## Phase 5: Training on the iMac
 - [ ] PPO in Stable-Baselines3 with about 8–10 parallel environments and `VecNormalize`.
+  - `train.py --name <run> --detector perfect|noisy --steps N`: PPO (128×128 MLP, γ 0.995) with 8 `SubprocVecEnv` environments and `VecNormalize`, about 2,400 steps/s on the iMac. Everything goes in `runs/<run>/` (git-ignored): TensorBoard logs, `best_model.zip`, `latest_model.zip`, each with its `_vecnormalize.pkl`, `eval.csv` and `config.json`.
+  - First run: `gate_perfect`, perfect detector, 3M steps.
 - [ ] Turn on realism one layer at a time, retraining after each: detector noise, then a thruster model (deadband, forward/reverse asymmetry, battery sag, spin-up lag), then randomized PID gains.
 - [ ] Measure the policy's success rate against the scripted baseline in the same randomized environment.
 
@@ -72,8 +74,10 @@ The display stays optional: training runs without a window, and the same physics
 - [x] **Watch live:** `main.py` keeps running the scripted mission as now. A `watch.py` loads a trained policy and flies it in the pygame window in real time (`render_mode="human"`).
   - `watch.py <scripted|straight|random|model.zip>` flies gate-environment episodes (same seeds as `tools/eval_gate.py`) in the pygame window. The panel shows the action, the reward, and the gate bearing/range the sub believes next to the truth. The top view shows the sub's path. Keys: pause, single-step, restart, next episode, quit; `--speed` and `--render-every` for faster playback.
   - Drawing moved into `sim_view.SimView`, shared by `main.py` and `watch.py`. Controllers moved into `gate_controllers.py`, shared by `watch.py` and `tools/eval_gate.py`.
-- [ ] **Training curves:** log reward, gate-pass rate, collision rate and episode length to TensorBoard (add `tensorboard` to `requirements.txt`). The env already reports the outcomes in `info`.
-- [ ] **Scored tests during training:** every N steps, fly the current policy deterministically on fixed seeds with `tools/eval_gate.py`'s scoring, plot its success rate against the scripted baseline, and keep the best checkpoint.
+- [x] **Training curves:** log reward, gate-pass rate, collision rate and episode length to TensorBoard (add `tensorboard` to `requirements.txt`). The env already reports the outcomes in `info`.
+  - `.venv/bin/tensorboard --logdir runs`, then open http://localhost:6006. `rollout/*` and `outcomes/*` are training episodes; `eval/*` are the scored tests.
+- [x] **Scored tests during training:** every N steps, fly the current policy deterministically on fixed seeds with `tools/eval_gate.py`'s scoring, plot its success rate against the scripted baseline, and keep the best checkpoint.
+  - Every 100k steps on 30 fixed starts (seeds 10000+). `eval/success_rate` is plotted next to `eval/scripted_success_rate`, and the best result is saved as `best_model.zip`. `watch.py` and `tools/eval_gate.py` take any saved checkpoint and apply its normalization.
 - [ ] **Evaluation videos (later):** during training, periodically record a few runs flown by the current policy as short videos.
 - [ ] **Replays (later):** save each run's path (pose, detections, actions) and play it back in the pygame window with pause and single-step.
 
