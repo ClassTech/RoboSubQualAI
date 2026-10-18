@@ -44,8 +44,11 @@ class SimulationConfig:
 
     # --- NEW 3D Physics Properties ---
     subMass: float = 4.0        # Mass (kg) 
-    subInertia_Z: float = 0.35  # Rotational Inertia (Yaw)
-    subInertia_Y: float = 0.35  # Rotational Inertia (Pitch) - ASSUMED, TUNE ME
+    # Rotational inertia, estimated from the layout: 3/4in PVC frame (~46 cm square,
+    # ~1.1 kg, plus ~0.9 kg of water if flooded), 6 thrusters (~0.7 kg) at 9in,
+    # 4x9in electronics tube (~1.3 kg) at the center, 4x6x4in battery box (~0.9 kg) on top.
+    subInertia_Z: float = 0.13  # Yaw (kg m^2). Mostly frame perimeter and thrusters.
+    subInertia_Y: float = 0.09  # Pitch (kg m^2)
     
     thrusterMaxForce: float = 0.8 # Max force per thruster (N)
     

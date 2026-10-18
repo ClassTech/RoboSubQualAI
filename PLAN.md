@@ -10,7 +10,7 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
 - PID gains get tuned in the pool, so training randomizes them.
 - Development and training run on the iMac: Python 3.12 `.venv`, torch 2.2.2 (see `requirements.txt`).
 - The pool is very clear: detection is easy at 25 m (`DetectorNoiseConfig.clearRange` 25–35 m, `maxRange` 35–50 m).
-- Measured: gate poles are 1" PVC (33.4 mm OD), the sub is 0.25 m tall, and the thrusters are 9" (0.229 m) from center. Scripted noisy baseline with these values: 36/40.
+- Measured: gate poles are 1" PVC (33.4 mm OD), the sub is 0.25 m tall, and the thrusters are 9" (0.229 m) from center. Inertia is estimated from the layout (¾" PVC frame, 4"×9" electronics tube, 4"×6"×4" battery box on top): yaw 0.13, pitch 0.09 kg·m². Scripted noisy baseline: 40/40 on two sets of 40 seeds, after fixing the gate-pass test (below).
 - Camera: 1280×960, 70° horizontal FOV. Objects are drawn at their real size (`camera_geometry.py`, shared by the renderer and the simulated detector).
 
 ## Phase 1: Simulator that runs without the display
@@ -34,7 +34,7 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
   - `tools/check_detector.py`: simulated boxes match OpenCV on the rendered image within 1–2 px. Range from the pole's bottom end is within 0.3%, gate range within ~0.5%. Range from pole width alone is within ~5%.
   - Task thresholds are now fractions of the image instead of pixels.
   - `Vision` holds a target for 0.5 s after a miss and only accepts one seen in 2 consecutive frames at about the same place.
-  - "Until lost" subtasks only count a target as gone when it was close (gate) or at the image edge (sway), not after a mid-view dropout.
+  - "Until lost" subtasks only count a target as gone when it was last seen at the image edge, not after a mid-view dropout. `DriveUntilTargetLost` also accepts a gate lost while big if it stays gone for 3 s.
   - `DriveUntilTargetLost` steers at the gate while it's visible.
   - Scripted mission, `tools/run_headless.py`: perfect detector 8/8. Noisy detector with clear-pool ranges about 90% over 40 runs (see Phase 1). With the earlier murky-water guess (6–10 m) it was about 4/12, because the gate is ~10–12 m from the marker.
 
@@ -64,4 +64,4 @@ The display stays optional: training runs without a window, and the same physics
 - The simulated detector doesn't model occlusion (e.g. a gate pole in front of the marker).
 - OpenCV mode at 1280×960 runs at roughly 20 fps on the iMac, so the graphics window is slower than before. The simulated detector is unaffected.
 - Should the policy control sway as well? The orbit task uses it, but the gate task doesn't need it. Leaning toward leaving it out for the gate task.
-- `subInertia_Z = 0.35` looks high. A solid 4 kg box of the sub's size would be about 0.14 kg·m², so the sim may turn slower than the real sub.
+- The sub's real mass and how its 4 kg splits between frame, thrusters, tube and battery box. The inertias (yaw 0.13, pitch 0.09 kg·m²) are estimated from the layout and should be randomized ±30% in training.

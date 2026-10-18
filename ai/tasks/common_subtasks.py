@@ -373,44 +373,55 @@ class Stabilize(Subtask):
 class DriveUntilTargetLost(Subtask):
     """
     Drives forward, steering at the target's center while it's in view and
-    holding the last heading when it isn't, until the target drops out of view
-    because we're passing it, i.e. it was large (close) when last seen. If it drops out
-    while still small (far away, e.g. missed detections), keeps driving and only
-    fails after lost_timeout seconds without seeing it.
+    holding the last heading when it isn't, until we're passing the target:
+    - it disappears after reaching the image edges (we're right at it), or
+    - it disappears after looking big (close) and stays gone for coast_seconds
+      (we went through it during missed detections).
+    If it disappears while still small (far away), keeps driving and only fails
+    after lost_timeout seconds without seeing it.
     """
     def __init__(self, surge_power: float = 0.5, target_type: str = 'gate',
-                 pass_size_fraction: float = 0.3, lost_timeout: float = 12.0):
+                 edge_margin_fraction: float = 0.1, pass_size_fraction: float = 0.3,
+                 coast_seconds: float = 3.0, lost_timeout: float = 12.0):
         if target_type not in ['gate', 'pole', 'either']: raise ValueError("target_type must be 'gate', 'pole', or 'either'")
         self.surge_power = surge_power; self.target_type = target_type
-        self.pass_size_fraction = pass_size_fraction; self.lost_timeout = lost_timeout
+        self.edge_margin_fraction = edge_margin_fraction; self.pass_size_fraction = pass_size_fraction
+        self.coast_seconds = coast_seconds; self.lost_timeout = lost_timeout
         self.heading_to_hold: Optional[float] = None; self.target_depth: float = 0.1
-        self.target_was_visible = False; self.last_size_fraction = 0.0; self.time_unseen = 0.0
-    def _visible_target(self, vision: Vision, cam_w: float) -> Optional[Tuple[float, float]]:
-        """(width as a fraction of image width, center x in pixels), or None if not visible."""
+        self.target_was_visible = False; self.last_size_fraction = 0.0; self.last_at_edge = False
+        self.time_unseen = 0.0
+    def _visible_target(self, vision: Vision) -> Optional[Tuple[float, float, float]]:
+        """(min x, max x, center x) of the target in pixels, or None if not visible."""
         if self.target_type in ('gate', 'either') and vision.is_gate_visible():
             left, right = vision.get_gate_pair()
-            return (right['max_x'] - left['min_x']) / cam_w, vision.get_gate_center_x()
+            return left['min_x'], right['max_x'], vision.get_gate_center_x()
         if self.target_type in ('pole', 'either') and vision.is_pole_visible():
             pole = vision.get_best_pole()
-            return pole['width'] / cam_w, pole['center_x']
+            return pole['min_x'], pole['max_x'], pole['center_x']
         return None
     def on_enter(self, sub: 'Submarine', sensors: SensorSuite, vision: Vision, context: Dict[str, Any]):
         self.heading_to_hold = context.get('initial_heading', sensors.heading)
         self.target_depth = context.get('target_depth', sensors.depth)
-        self.target_was_visible = False; self.last_size_fraction = 0.0; self.time_unseen = 0.0
+        self.target_was_visible = False; self.last_size_fraction = 0.0; self.last_at_edge = False
+        self.time_unseen = 0.0
     def execute(self, sub: 'Submarine', dt: float, sensors: SensorSuite, vision: Vision, config: SimulationConfig, context: Dict[str, Any]) -> Tuple[SubtaskStatus, ThrusterCommands]:
         if self.heading_to_hold is None: self.heading_to_hold = sensors.heading
         cam_w, cam_h = sensors.camera_image.get_size()
-        target = self._visible_target(vision, cam_w)
+        target = self._visible_target(vision)
         if target is not None:
-            size, center_x = target
-            self.target_was_visible = True; self.last_size_fraction = size; self.time_unseen = 0.0
+            min_x, max_x, center_x = target
+            margin = self.edge_margin_fraction * cam_w
+            self.target_was_visible = True; self.time_unseen = 0.0
+            self.last_size_fraction = (max_x - min_x) / cam_w
+            self.last_at_edge = min_x < margin or max_x > cam_w - margin
             # Steer at the target: its heading is our heading plus its bearing (positive = left).
             bearing = bearing_deg(CameraModel(cam_w, cam_h, config.cameraFov), center_x)
             self.heading_to_hold = (sensors.heading + bearing) % 360
         else:
             self.time_unseen += dt
-            if self.target_was_visible and self.last_size_fraction >= self.pass_size_fraction:
+            passing = self.last_at_edge or (self.last_size_fraction >= self.pass_size_fraction
+                                            and self.time_unseen > self.coast_seconds)
+            if self.target_was_visible and passing:
                 return SubtaskStatus.COMPLETED, sub._get_damping_commands(sensors)
             if self.time_unseen > self.lost_timeout:
                 print(f"ERROR: DriveUntilTargetLost - '{self.target_type}' not seen for {self.lost_timeout}s while still far away")
