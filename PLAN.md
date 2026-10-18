@@ -88,7 +88,7 @@ The display stays optional: training runs without a window, and the same physics
 - [ ] **Evaluation videos (later):** during training, periodically record a few runs flown by the current policy as short videos.
 - [ ] **Replays (later):** save each run's path (pose, detections, actions) and play it back in the pygame window with pause and single-step.
 
-## Phase 6: Export to the Pi 5
+## Phase 6: Export to the Pi 5 (deferred)
 - [ ] Export the weights plus the `VecNormalize` statistics, and write a plain-numpy forward pass.
 - [ ] Check that the numpy policy and the PyTorch policy give the same outputs on recorded observations.
 
