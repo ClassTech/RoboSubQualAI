@@ -69,7 +69,9 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
 
 ## Seeing what's going on
 The display stays optional: training runs without a window, and the same physics draws in the pygame window when you want to watch.
-- [ ] **Watch live:** `main.py` keeps running the scripted mission as now. A `watch.py` loads a trained policy and flies it in the pygame window in real time (`render_mode="human"`).
+- [x] **Watch live:** `main.py` keeps running the scripted mission as now. A `watch.py` loads a trained policy and flies it in the pygame window in real time (`render_mode="human"`).
+  - `watch.py <scripted|straight|random|model.zip>` flies gate-environment episodes (same seeds as `tools/eval_gate.py`) in the pygame window. The panel shows the action, the reward, and the gate bearing/range the sub believes next to the truth. The top view shows the sub's path. Keys: pause, single-step, restart, next episode, quit; `--speed` and `--render-every` for faster playback.
+  - Drawing moved into `sim_view.SimView`, shared by `main.py` and `watch.py`. Controllers moved into `gate_controllers.py`, shared by `watch.py` and `tools/eval_gate.py`.
 - [ ] **Training curves:** log reward, gate-pass rate, collision rate and episode length to TensorBoard (add `tensorboard` to `requirements.txt`). The env already reports the outcomes in `info`.
 - [ ] **Scored tests during training:** every N steps, fly the current policy deterministically on fixed seeds with `tools/eval_gate.py`'s scoring, plot its success rate against the scripted baseline, and keep the best checkpoint.
 - [ ] **Evaluation videos (later):** during training, periodically record a few runs flown by the current policy as short videos.

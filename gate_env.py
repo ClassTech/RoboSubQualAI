@@ -70,6 +70,7 @@ class GateEnv(gym.Env):
         self.start_cfg = start or StartConfig()
         self.reward_cfg = reward or RewardConfig()
         self.controller = SetpointController()
+        self.on_physics_step = None   # Optional callback(env, thruster_commands) after each physics step, for viewers
         self.core = SubSim(detector_mode=detector_mode, log=None)
         self.builder = ObservationBuilder(self.core.camera, action_dim=3)
         self.action_space = gym.spaces.Box(-1.0, 1.0, shape=(3,), dtype=np.float32)
@@ -128,6 +129,8 @@ class GateEnv(gym.Env):
             self.readings = self.core.read_sensors(dt)
             self.detections = self.core.detect(dt)
             self.time += dt
+            if self.on_physics_step:
+                self.on_physics_step(self, cmd)
             if self.core.collision_count > collisions_before:
                 outcome = "collision"
             elif len(self.core.crossings) > crossings_before:
