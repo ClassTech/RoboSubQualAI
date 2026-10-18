@@ -36,15 +36,15 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize
 
 from gate_controllers import make_controller, policy_controller, run_episode, vecnormalize_path
-from gate_env import GateEnv
+from gate_env import GateEnv, RewardConfig
 
 OUTCOME_KEYS = ("is_success", "collision", "missed_gate", "timeout")
 EVAL_SEED = 10_000
 
 
-def make_env(detector: str, seed: int):
+def make_env(detector: str, seed: int, reward: RewardConfig):
     def _init():
-        env = Monitor(GateEnv(detector_mode=detector), info_keywords=OUTCOME_KEYS + ("time_s", "energy"))
+        env = Monitor(GateEnv(detector_mode=detector, reward=reward), info_keywords=OUTCOME_KEYS + ("time_s", "energy"))
         env.reset(seed=seed)
         return env
     return _init
@@ -153,13 +153,19 @@ def main():
     parser.add_argument("--eval-every", type=int, default=100_000)
     parser.add_argument("--eval-episodes", type=int, default=30)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--target-kl", type=float, default=0.03,
+                        help="Stop each PPO update once the policy has moved this far (KL divergence); 0 = no limit")
+    parser.add_argument("--learning-rate", type=float, default=3e-4, help="Starting learning rate; falls linearly to 0")
+    parser.add_argument("--center-line-weight", type=float, default=RewardConfig.center_line_weight,
+                        help="Reward weight for distance from the gate's center line")
     args = parser.parse_args()
 
     run_dir = os.path.join("runs", args.name)
     os.makedirs(run_dir, exist_ok=True)
     # Each update uses 8192 steps however many environments collect them
     hyper = dict(n_steps=max(64, 8192 // args.envs), batch_size=256, n_epochs=10, gamma=0.995, gae_lambda=0.95,
-                 learning_rate=3e-4, clip_range=0.2, ent_coef=0.005,
+                 learning_rate=args.learning_rate, clip_range=0.2, ent_coef=0.005,
+                 target_kl=args.target_kl or None,
                  policy_kwargs=dict(net_arch=[128, 128]))
     with open(os.path.join(run_dir, "config.json"), "w") as f:
         json.dump({**vars(args), "ppo": hyper}, f, indent=2)
@@ -169,10 +175,13 @@ def main():
     baseline = score(GateEnv(detector_mode=args.detector), make_controller("scripted"), args.eval_episodes)
     print(f"Scripted: success {100 * baseline['success_rate']:.0f}%, time to gate {baseline['time_to_gate']:.1f} s", flush=True)
 
-    venv = SubprocVecEnv([make_env(args.detector, args.seed * 1000 + i) for i in range(args.envs)])
+    reward = RewardConfig(center_line_weight=args.center_line_weight)
+    venv = SubprocVecEnv([make_env(args.detector, args.seed * 1000 + i, reward) for i in range(args.envs)])
     venv = VecNormalize(venv, norm_obs=True, norm_reward=True, clip_obs=10.0, gamma=hyper["gamma"])
+    # Learning rate falls linearly to 0 over the run, which steadies the late updates
     model = PPO("MlpPolicy", venv, seed=args.seed, device="cpu", verbose=0,
-                tensorboard_log=os.path.join(run_dir, "tb"), **hyper)
+                tensorboard_log=os.path.join(run_dir, "tb"),
+                **{**hyper, "learning_rate": lambda progress_left: args.learning_rate * progress_left})
     callbacks = [OutcomeLogger(),
                  ScoredTest(run_dir, args.detector, args.eval_every, args.eval_episodes, baseline)]
     print(f"Training {int(args.steps):,} steps with {args.envs} environments; logs in {run_dir}/tb", flush=True)

@@ -63,14 +63,18 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
   - `GateEnv` passes Stable-Baselines3's `check_env`, imports no pygame or OpenCV, and runs ~1,200 steps/s on one core (~120× real time).
 
 ## Phase 5: Training on the iMac
-- [ ] PPO in Stable-Baselines3 with about 8–10 parallel environments and `VecNormalize`.
+- [x] PPO in Stable-Baselines3 with about 8–10 parallel environments and `VecNormalize`.
   - `train.py --name <run> --detector perfect|noisy --steps N`: PPO (128×128 MLP, γ 0.995) with 8 `SubprocVecEnv` environments and `VecNormalize`, about 2,400 steps/s on the iMac. Everything goes in `runs/<run>/` (git-ignored): TensorBoard logs, `best_model.zip`, `latest_model.zip`, each with its `_vecnormalize.pkl`, `eval.csv` and `config.json`.
   - Default 16 environments with 8,192-step updates, about 2,900 steps/s. More update threads don't help; the main process's round trips to the workers are the bottleneck, so spare cores go to running two trainings at once.
   - Run `gate_perfect` (first observation, perfect detector, 3M steps, 22 min): peaked at 70% on the scored tests, 77/100 on a longer check, and only 17/100 with the noisy detector. Failures drifted consistently to one side: close to the gate the policy couldn't tell which pole it saw, and it didn't know the gate's angle.
   - Observation v2 (27 values per frame, 108 stacked): separate left and right pole tracks that keep their identity when only one is in view; the gate's approach angle and center-line offset (`perception.gate_geometry`, smoothed over ~1 s); `observation.INDEX` names every value. Reward adds distance from the gate's center line (weight 0.5). With noise, the approach angle is within 1.8° median and the offset within 0.16 m median; a lone pole gets the right label 100% of the time (perfect detector) or 91% (noisy).
-  - Runs `gate_perfect_v2` and `gate_noisy_v2` (observation v2, 3M steps each, side by side).
+  - Runs `gate_perfect_v2` and `gate_noisy_v2` (observation v2): 23% and 10%. Tests showed neither the center-line reward nor the environment count was the cause. Runs found the gate early, then lost it. Every run's late updates were 10–20× larger than healthy (`approx_kl` up to 0.57), and the first run had escaped this by seed luck.
+  - Stability fix: `target_kl` 0.03 and a learning rate that falls linearly to 0. Seed 1 then held 80%, but seed 0 settled into hovering near the gate and timing out, which cost nothing.
+  - Reward fix: timeouts cost −5 like other failures, and the gate bonus is +20. Both seeds then reach 97–100% by 400k steps and keep improving.
+  - **Run `r3_perfect_s0` (best checkpoint, 100 eval starts): 100% with the perfect detector, median 8.8 s to the gate; 99% with the noisy detector it never trained on, median 10.0 s.** The scripted task gets 100% at 21.7 s.
 - [ ] Turn on realism one layer at a time, retraining after each: detector noise, then a thruster model (deadband, forward/reverse asymmetry, battery sag, spin-up lag), then randomized PID gains.
 - [ ] Measure the policy's success rate against the scripted baseline in the same randomized environment.
+  - Perfect and noisy detectors done (above). Repeat after each realism layer.
 
 ## Seeing what's going on
 The display stays optional: training runs without a window, and the same physics draws in the pygame window when you want to watch.

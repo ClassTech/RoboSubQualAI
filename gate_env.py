@@ -11,8 +11,8 @@ loops (controller.py) then hold at the physics rate until the next action:
 The policy sees observation.py's observation, built only from what the real
 sub measures.
 
-An episode ends when the sub goes forward through the gate (success), hits
-something, crosses the gate line anywhere else, or runs out of time.
+An episode ends when the sub goes forward through the gate (success, +20), hits
+something, crosses the gate line anywhere else, or runs out of time (-5 each).
 At the end, info carries the outcome for logging: is_success, collision,
 missed_gate, timeout, time_s and energy.
 """
@@ -48,9 +48,10 @@ class RewardConfig:
     depth_weight: float = 1.0      # How much depth error counts in that distance
     center_line_weight: float = 0.5  # How much distance from the gate's center line counts
     target_depth_m: float = 1.5    # Middle of the usable gate opening
-    gate_bonus: float = 10.0
+    gate_bonus: float = 20.0
     collision_penalty: float = 5.0
     missed_gate_penalty: float = 5.0
+    timeout_penalty: float = 5.0   # So hovering near the gate isn't a safe alternative to committing
     time_penalty: float = 0.01     # Per step
     energy_penalty: float = 0.05   # Per second at full thrust on every thruster
 
@@ -155,6 +156,8 @@ class GateEnv(gym.Env):
 
         terminated = outcome is not None
         truncated = not terminated and self.time >= self.max_seconds - 1e-9
+        if truncated:
+            reward -= rc.timeout_penalty
         info = {}
         if terminated or truncated:
             info = {"is_success": outcome == "success", "collision": outcome == "collision",
