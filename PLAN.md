@@ -95,7 +95,10 @@ The display stays optional: training runs without a window, and the same physics
   - Safety margin: within 1.5 m of the marker's center counts as a failure ("too close", −5). Speed is not a priority.
 - [x] Perfect-detector orbit policy (before the margin): 100% at 14 s, but it skimmed the marker at 0.50 m (~12 cm clearance), had it in view only 41% of the loop, and got 7/50 with the noisy detector.
 - [x] Scripted orbit retuned for the margin: orbit width 0.08 of the image (~2.7 m) plus 3 s extra sway before heading back. Orbit starts: 100% perfect (~70 s), 94% noisy, no margin violations. Full mission: 38/40 noisy, 2 runs inside the margin on the return.
-- [ ] Train the orbit with the noisy detector and the 1.5 m margin (`orbit_noisy_s0`, `orbit_noisy_s1`).
+- [x] Train the orbit with the noisy detector and the 1.5 m margin.
+  - First try (`orbit_noisy_s0`/`s1`): 74/100 at best. It circled mostly blind (marker in view ~16–30% of the loop), steering from memory, and drifted inside the margin.
+  - Added a cost (0.03 per step) for losing sight of the marker for more than 0.5 s while going around. Both seeds switched to facing the marker and sliding around it (~85% in view).
+  - **`orbit_view_s0` best checkpoint, 100 noisy starts: 96% (4 too close, nothing else), median 27.7 s, marker in view 86%, energy 16.** The scripted orbit gets 94% at ~74 s, energy ~30. Seed 1 peaked at 73%, mostly drifting inside the margin.
 - [ ] Chain gate → orbit → gate (does the gate policy handle the return as is?) and score the whole mission against the scripted one.
 
 ## Phase 6: Export to the Pi 5 (deferred)
