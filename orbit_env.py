@@ -28,6 +28,7 @@ import numpy as np
 from sub_env import SubTaskEnv
 
 SWEEP_DEG = 270.0
+MARKER_GRACE_S = 0.5           # A dropout this short doesn't count as losing sight of the marker
 MIN_MARKER_DISTANCE_M = 1.5    # Center to center; contact is at about 0.38 m
 HANDOFF_HEADING_DEG = 45.0
 
@@ -58,12 +59,14 @@ class OrbitRewardConfig:
     too_close_penalty: float = 5.0
     wrong_way_penalty: float = 5.0
     timeout_penalty: float = 5.0
+    marker_unseen_cost: float = 0.03   # Per step without the marker in view (> MARKER_GRACE_S) while going around
     time_penalty: float = 0.01     # Per step
     energy_penalty: float = 0.05   # Per second at full thrust on every thruster
 
 
 class OrbitEnv(SubTaskEnv):
     OUTCOMES = ("is_success", "collision", "too_close", "wrong_way", "timeout")
+    EXTRA_INFO = ("marker_view",)   # Fraction of the loop with the marker in view
     INCLUDE_MARKER = True
     ACTION_DIM = 4
 
@@ -92,6 +95,22 @@ class OrbitEnv(SubTaskEnv):
     def _on_reset(self):
         self.swept = 0.0                       # Signed degrees swept around the marker
         self._last_angle = self._marker_angle()
+        self._loop_steps = self._loop_steps_seen = 0
+
+    def _going_around(self) -> bool:
+        return abs(self.swept) < SWEEP_DEG
+
+    def _step_cost(self) -> float:
+        """Keeping the marker in view while going around is how the sub stays safe with one forward camera."""
+        if not self._going_around():
+            return 0.0
+        self._loop_steps += 1
+        seen = self.builder.marker.unseen <= MARKER_GRACE_S
+        self._loop_steps_seen += seen
+        return 0.0 if seen else self.reward_cfg.marker_unseen_cost
+
+    def _episode_info(self) -> dict:
+        return {"marker_view": self._loop_steps_seen / max(1, self._loop_steps)}
 
     def _physics_outcome(self) -> Optional[str]:
         angle = self._marker_angle()

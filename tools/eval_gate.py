@@ -38,6 +38,7 @@ def main():
 
     counts = dict.fromkeys(OUTCOMES, 0)
     times, rewards, energies = [], [], []
+    extra = {k: [] for k in env.EXTRA_INFO}
     for i in range(args.episodes):
         info, total = run(args.seed + i)
         for k in OUTCOMES:
@@ -46,6 +47,8 @@ def main():
             times.append(info["time_s"])
         rewards.append(total)
         energies.append(info["energy"])
+        for k in extra:
+            extra[k].append(info[k])
 
     n = args.episodes
     print(f"{args.controller} on {n} {args.task} episodes ({args.detector} detector, seeds {args.seed}-{args.seed + n - 1}):")
@@ -54,6 +57,8 @@ def main():
     if times:
         print(f"  time to success: median {statistics.median(times):.1f} s, max {max(times):.1f} s")
     print(f"  reward: mean {statistics.mean(rewards):.2f}   energy: mean {statistics.mean(energies):.2f}")
+    for k, values in extra.items():
+        print(f"  {k.replace('_', ' ')}: mean {100 * statistics.mean(values):.0f}%")
 
 
 if __name__ == "__main__":

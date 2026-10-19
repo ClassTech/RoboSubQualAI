@@ -49,7 +49,7 @@ def env_kwargs(task: str, args) -> dict:
 def make_env(task: str, detector: str, seed: int, kwargs: dict):
     def _init():
         env = envs.make(task, detector, **kwargs)
-        env = Monitor(env, info_keywords=env.OUTCOMES + ("time_s", "energy"))
+        env = Monitor(env, info_keywords=env.OUTCOMES + ("time_s", "energy") + env.EXTRA_INFO)
         env.reset(seed=seed)
         return env
     return _init
@@ -64,8 +64,11 @@ def score(env, controller, episodes: int) -> dict:
     """Flies the fixed evaluation starts and summarizes the outcomes."""
     counts = dict.fromkeys(env.OUTCOMES, 0)
     times, rewards = [], []
+    extra = {k: [] for k in env.EXTRA_INFO}
     for i in range(episodes):
         info, total = run_episode(env, controller, EVAL_SEED + i)
+        for k in extra:
+            extra[k].append(info[k])
         for k in env.OUTCOMES:
             counts[k] += bool(info[k])
         if info["is_success"]:
@@ -75,15 +78,17 @@ def score(env, controller, episodes: int) -> dict:
     result.update({f"{k}_rate": counts[k] / episodes for k in env.OUTCOMES if k != "is_success"})
     result[time_key(env)] = statistics.median(times) if times else float("nan")
     result["mean_reward"] = statistics.mean(rewards)
+    result.update({k: statistics.mean(v) for k, v in extra.items()})
     return result
 
 
 class OutcomeLogger(BaseCallback):
     """Logs how training episodes end (each failure kind, time to success, energy) to TensorBoard."""
-    def __init__(self, outcomes, time_name: str, window: int = 200):
+    def __init__(self, outcomes, time_name: str, extra=(), window: int = 200):
         super().__init__()
         self.outcomes = [k for k in outcomes if k != "is_success"]
         self.time_name = time_name
+        self.extra = extra
         self.recent = deque(maxlen=window)
 
     def _on_step(self) -> bool:
@@ -102,6 +107,8 @@ class OutcomeLogger(BaseCallback):
         if times:
             self.logger.record(f"outcomes/{self.time_name}", statistics.median(times))
         self.logger.record("outcomes/energy", statistics.mean(i["energy"] for i in self.recent))
+        for key in self.extra:
+            self.logger.record(f"outcomes/{key}", statistics.mean(i[key] for i in self.recent))
 
 
 class ScoredTest(BaseCallback):
@@ -149,9 +156,10 @@ class ScoredTest(BaseCallback):
                         *[f"{v:.3f}" for v in result.values()], int(is_best)])
         failures = ", ".join(f"{k[:-5].replace('_', ' ')} {100 * v:.0f}%" for k, v in result.items()
                              if k.endswith("_rate") and k != "success_rate")
+        extras = "".join(f", {k.replace('_', ' ')} {100 * result[k]:.0f}%" for k in self.env.EXTRA_INFO)
         print(f"[{(time.time() - self.started) / 60:5.1f} min] {self.num_timesteps:>9,} steps: "
               f"success {100 * result['success_rate']:3.0f}% (scripted {100 * self.baseline['success_rate']:.0f}%), "
-              f"{failures}, time {result[self.time_key]:.1f} s{'  <- best' if is_best else ''}", flush=True)
+              f"{failures}, time {result[self.time_key]:.1f} s{extras}{'  <- best' if is_best else ''}", flush=True)
         return True
 
 
@@ -169,6 +177,8 @@ def main():
     parser.add_argument("--target-kl", type=float, default=0.03,
                         help="Stop each PPO update once the policy has moved this far (KL divergence); 0 = no limit")
     parser.add_argument("--learning-rate", type=float, default=3e-4, help="Starting learning rate; falls linearly to 0")
+    parser.add_argument("--resume", help="Continue training from this checkpoint .zip (and its _vecnormalize.pkl) "
+                                         "instead of starting fresh; --task must match")
     parser.add_argument("--center-line-weight", type=float, default=RewardConfig.center_line_weight,
                         help="Gate skill: reward weight for distance from the gate's center line")
     args = parser.parse_args()
@@ -191,12 +201,20 @@ def main():
     print(f"Scripted: success {100 * baseline['success_rate']:.0f}%, time {baseline[time_key(eval_env)]:.1f} s", flush=True)
 
     venv = SubprocVecEnv([make_env(args.task, args.detector, args.seed * 1000 + i, kwargs) for i in range(args.envs)])
-    venv = VecNormalize(venv, norm_obs=True, norm_reward=True, clip_obs=10.0, gamma=hyper["gamma"])
     # Learning rate falls linearly to 0 over the run, which steadies the late updates
-    model = PPO("MlpPolicy", venv, seed=args.seed, device="cpu", verbose=0,
-                tensorboard_log=os.path.join(run_dir, "tb"),
-                **{**hyper, "learning_rate": lambda progress_left: args.learning_rate * progress_left})
-    callbacks = [OutcomeLogger(eval_env.OUTCOMES, time_key(eval_env)),
+    schedule = lambda progress_left: args.learning_rate * progress_left
+    if args.resume:
+        venv = VecNormalize.load(vecnormalize_path(args.resume), venv)
+        venv.training, venv.norm_reward = True, True
+        model = PPO.load(args.resume, env=venv, device="cpu", tensorboard_log=os.path.join(run_dir, "tb"),
+                         custom_objects={"learning_rate": schedule, "lr_schedule": schedule,
+                                         "target_kl": hyper["target_kl"]})
+        print(f"Resuming from {args.resume}", flush=True)
+    else:
+        venv = VecNormalize(venv, norm_obs=True, norm_reward=True, clip_obs=10.0, gamma=hyper["gamma"])
+        model = PPO("MlpPolicy", venv, seed=args.seed, device="cpu", verbose=0,
+                    tensorboard_log=os.path.join(run_dir, "tb"), **{**hyper, "learning_rate": schedule})
+    callbacks = [OutcomeLogger(eval_env.OUTCOMES, time_key(eval_env), eval_env.EXTRA_INFO),
                  ScoredTest(run_dir, eval_env, args.eval_every, args.eval_episodes, baseline)]
     print(f"Training {int(args.steps):,} steps with {args.envs} environments; logs in {run_dir}/tb", flush=True)
     model.learn(total_timesteps=int(args.steps), callback=callbacks, tb_log_name="ppo")

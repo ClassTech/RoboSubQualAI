@@ -18,6 +18,8 @@ counts as progress:
   _step_outcome()          after each 10 Hz step (once the observation is updated): outcome or None
   _potential()             progress measure (ground truth); reward is its change each step
   _terminal_reward(name)   bonus or penalty for how the episode ended
+  _step_cost()             optional extra cost each 10 Hz step (default 0)
+  _episode_info()          optional extra numbers for info at the end (named in EXTRA_INFO)
   scripted_mission()       the scripted tasks that do this skill, for comparison
 OUTCOMES lists the possible endings ("is_success", "timeout" and the
 skill's own failures); info carries them as booleans when an episode ends,
@@ -44,6 +46,7 @@ Driver = Callable[[SensorReadings, object, float], ThrusterCommands]
 class SubTaskEnv(gym.Env):
     metadata = {"render_modes": []}
     OUTCOMES = ("is_success", "collision", "timeout")
+    EXTRA_INFO = ()          # Names of extra per-episode numbers from _episode_info()
     INCLUDE_MARKER = False   # Whether the observation tracks the green marker pole
     ACTION_DIM = 3           # 4 adds sway
 
@@ -82,6 +85,12 @@ class SubTaskEnv(gym.Env):
 
     def _on_reset(self):
         pass
+
+    def _step_cost(self) -> float:
+        return 0.0
+
+    def _episode_info(self) -> dict:
+        return {}
 
     def scripted_mission(self) -> List:
         raise NotImplementedError
@@ -157,7 +166,7 @@ class SubTaskEnv(gym.Env):
         self.energy += step_energy
         new_potential = self._potential()
         reward = self.progress_weight * (new_potential - self.potential) - self.time_penalty
-        reward -= self.energy_penalty * step_energy
+        reward -= self.energy_penalty * step_energy + self._step_cost()
         self.potential = new_potential
 
         terminated = outcome is not None
@@ -170,7 +179,7 @@ class SubTaskEnv(gym.Env):
         info = {}
         if terminated or truncated:
             info = {k: (k == "is_success" and outcome == "success") or k == outcome for k in self.OUTCOMES}
-            info.update(time_s=self.time, energy=self.energy)
+            info.update(time_s=self.time, energy=self.energy, **self._episode_info())
         return obs, float(reward), terminated, truncated, info
 
     # --- Helpers ---
