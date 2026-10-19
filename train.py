@@ -47,7 +47,7 @@ def env_kwargs(task: str, args, scoring: bool = False) -> dict:
     if task == "gate":
         return {"reward": RewardConfig(center_line_weight=args.center_line_weight)}
     if task == "orbit":
-        return {"margin_rule": "soft" if scoring else args.margin_rule}
+        return {"margin_rule": "soft" if scoring else args.margin_rule, "practice_starts": not scoring}
     return {}
 
 

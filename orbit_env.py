@@ -23,6 +23,11 @@ The safety margin (MIN_MARKER_DISTANCE_M from the marker's center) has two rules
         Policies learn to stay clear much more reliably this way; from scratch
         under the soft rule they get stuck near the marker.
 
+Practice starts (training only): with practice_starts, a share of episodes
+start partway around the marker, facing it, with the sweep count and the
+handoff's reference heading set to match, so the policy gets plenty of
+practice at finishing the loop and turning to the gate. Scoring uses normal starts.
+
 While going around, each step costs more the farther the marker is from the
 center of the camera view (out of view counts as the edge), so the policy keeps
 it centered, with room for noise, as the scripted orbit does.
@@ -54,12 +59,17 @@ class OrbitStartConfig:
     lateral_m: tuple = (-1.0, 1.0)        # Sideways from the gate's center line
     heading_deg: tuple = (-30.0, 30.0)    # Relative to facing the marker's direction
     depth_m: tuple = (1.2, 1.7)
+    # Practice starts (training only)
+    practice_share: float = 0.33          # Share of episodes that start partway around
+    practice_swept_deg: tuple = (150.0, 300.0)
+    practice_distance_m: tuple = (1.8, 2.6)
+    practice_heading_deg: tuple = (-20.0, 20.0)   # Relative to facing the marker
 
 
 @dataclass
 class OrbitRewardConfig:
     sweep: float = 2.0             # Per radian swept around the marker, up to SWEEP_DEG
-    face_gate: float = 2.0         # For facing the gate, phased in over the second half of the sweep
+    face_gate: float = 4.0         # For facing the gate, phased in over the second half of the sweep
     depth_weight: float = 1.0      # Per meter from target_depth_m
     target_depth_m: float = 1.5
     far_weight: float = 0.5        # Per meter farther than far_m from the marker
@@ -86,9 +96,11 @@ class OrbitEnv(SubTaskEnv):
 
     def __init__(self, detector_mode: str = "perfect", control_period: float = 0.1,
                  max_seconds: float = 90.0, start: Optional[OrbitStartConfig] = None,
-                 reward: Optional[OrbitRewardConfig] = None, margin_rule: str = "soft"):
+                 reward: Optional[OrbitRewardConfig] = None, margin_rule: str = "soft",
+                 practice_starts: bool = False):
         assert margin_rule in ("soft", "hard"), margin_rule
         self.margin_rule = margin_rule
+        self.practice_starts = practice_starts
         self.start_cfg = start or OrbitStartConfig()
         self.reward_cfg = rc = reward or OrbitRewardConfig()
         super().__init__(detector_mode, control_period, max_seconds, energy_penalty=rc.energy_penalty,
@@ -97,7 +109,18 @@ class OrbitEnv(SubTaskEnv):
 
     # --- Episode ---
     def _place_sub(self, rng: random.Random):
-        s, g, sc = self.core.state, self.core.gate, self.start_cfg
+        s, g, m, sc = self.core.state, self.core.gate, self.core.marker, self.start_cfg
+        self._preset_swept = 0.0
+        if self.practice_starts and rng.random() < sc.practice_share:
+            # Partway around the marker, facing it. The orbit begins on the gate side (angle 180 deg).
+            swept = rng.choice((-1, 1)) * rng.uniform(*sc.practice_swept_deg)
+            angle = math.radians(180.0 + swept)
+            d = rng.uniform(*sc.practice_distance_m)
+            s.x, s.y = m.x + d * math.cos(angle), m.y + d * math.sin(angle)
+            s.heading = (math.degrees(math.atan2(m.y - s.y, m.x - s.x)) + rng.uniform(*sc.practice_heading_deg)) % 360
+            s.z = rng.uniform(*sc.depth_m)
+            self._preset_swept = swept
+            return
         s.x = g.x + rng.uniform(*sc.past_gate_m)
         s.y = g.center_y + rng.uniform(*sc.lateral_m)
         s.heading = rng.uniform(*sc.heading_deg) % 360
@@ -109,8 +132,12 @@ class OrbitEnv(SubTaskEnv):
         return math.degrees(math.atan2(s.y - m.y, s.x - m.x))
 
     def _on_reset(self):
-        self.swept = 0.0                       # Signed degrees swept around the marker
+        self.swept = self._preset_swept          # Signed degrees swept around the marker
         self._last_angle = self._marker_angle()
+        if self._preset_swept:
+            # Reference heading for the handoff: as if the orbit had begun facing the marker
+            # from the gate side (true heading 0), expressed in the magnetometer's frame
+            self.builder.start_heading = (self.readings.heading - self.core.state.heading) % 360
         self._loop_steps = self._loop_steps_seen = 0
         self._off_center_sum = 0.0
         self._inside_margin_s, self._closest = 0.0, self._marker_distance()
