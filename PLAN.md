@@ -106,7 +106,11 @@ The display stays optional: training runs without a window, and the same physics
 - [x] Keep the marker centered: the out-of-view cost became an off-center cost (0.04 per step × bearing / 35°). Training uses the hard margin stop (`--margin-rule hard`), scoring the real-world rule.
   - `orbit_view_s0` held the marker ~25° off center, near the edge of the view. Continuing it with the new cost didn't change that habit.
   - **Fresh `orbit_center_s0` (chosen for the mission), 100 noisy starts: 95% (4 timeouts, 1 wrong way, no collisions), marker 6.5° off center, in view 87% of the loop, ~1 s per loop just inside the margin (worst pass 0.98 m), median 37.9 s.** It faces the marker and slides around at the margin's edge, which is fine when a small dip only costs a little.
-- [ ] Chain gate → orbit → gate (does the gate policy handle the return as is?) and score the whole mission against the scripted one.
+- [x] Found while measuring the orbit's handoff: **every orbit policy above finished its loop on the surface.** The mixer scaled all six thrusters together, so hard sliding and turning cut the vertical thrust below the sub's ~1 N of buoyancy. Fixed: horizontal and vertical thrusters scale separately (`controller.mix`). Surfacing now ends a run in the skill environments (−5), as it does in RoboSub. The orbit results above don't count.
+  - Re-checked with the new mixer: gate policy `r3_perfect_s0` 100% perfect (8.3 s), 99% noisy, no retraining needed; scripted gate 100%, scripted orbit 96% (2 surfaced); full scripted mission 39/40.
+- [ ] Retrain the orbit (fresh, centering, hard margin rule): `orbit_mix_s0`, `orbit_mix_s1`.
+- [ ] Gate return: the gate policy from the orbit's handoff positions.
+- [ ] Chain gate → orbit → gate and score the whole mission against the scripted one.
 
 ## Phase 6: Export to the Pi 5 (deferred)
 - [ ] Export the weights plus the `VecNormalize` statistics, and write a plain-numpy forward pass.
