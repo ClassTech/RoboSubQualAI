@@ -103,6 +103,9 @@ The display stays optional: training runs without a window, and the same physics
   - Training from scratch under the soft rule fails (best 13%: the policy lingers near the marker, collides or times out). Continuing the best policy under it (`orbit_recover_resume`) gives 96/100 (4 timeouts).
   - **The original `orbit_view_s0`, trained with the margin as a hard stop, scores 100/100 under the soft rule** (median 28.1 s, 0.14 s per loop inside the margin on average, closest pass 1.09 m). Use it.
   - Method for future retraining: train with the hard stop, judge by the real-world rule.
+- [x] Keep the marker centered: the out-of-view cost became an off-center cost (0.04 per step × bearing / 35°). Training uses the hard margin stop (`--margin-rule hard`), scoring the real-world rule.
+  - `orbit_view_s0` held the marker ~25° off center, near the edge of the view. Continuing it with the new cost didn't change that habit.
+  - **Fresh `orbit_center_s0` (chosen for the mission), 100 noisy starts: 95% (4 timeouts, 1 wrong way, no collisions), marker 6.5° off center, in view 87% of the loop, ~1 s per loop just inside the margin (worst pass 0.98 m), median 37.9 s.** It faces the marker and slides around at the margin's edge, which is fine when a small dip only costs a little.
 - [ ] Chain gate → orbit → gate (does the gate policy handle the return as is?) and score the whole mission against the scripted one.
 
 ## Phase 6: Export to the Pi 5 (deferred)
