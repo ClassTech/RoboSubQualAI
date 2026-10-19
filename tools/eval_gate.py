@@ -58,13 +58,13 @@ def main():
         print(f"  time to success: median {statistics.median(times):.1f} s, max {max(times):.1f} s")
     print(f"  reward: mean {statistics.mean(rewards):.2f}   energy: mean {statistics.mean(energies):.2f}")
     for k, values in extra.items():
-        name = k.replace('_', ' ')
-        if k.endswith("_s") or k.endswith("_m"):
-            unit = k[-1]
-            print(f"  {name[:-2]}: mean {statistics.mean(values):.2f} {unit}, worst "
-                  f"{(max if unit == 's' else min)(values):.2f} {unit}")
+        unit = next((u for suffix, u in (("_deg", "deg"), ("_s", "s"), ("_m", "m")) if k.endswith(suffix)), None)
+        if unit:
+            name = k[:k.rfind("_")].replace("_", " ")
+            worst = min(values) if unit == "m" else max(values)   # Closest pass; longest time / largest angle
+            print(f"  {name}: mean {statistics.mean(values):.2f} {unit}, worst {worst:.2f} {unit}")
         else:
-            print(f"  {name}: mean {100 * statistics.mean(values):.0f}%")
+            print(f"  {k.replace('_', ' ')}: mean {100 * statistics.mean(values):.0f}%")
 
 
 if __name__ == "__main__":

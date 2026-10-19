@@ -42,8 +42,13 @@ from gate_env import RewardConfig
 EVAL_SEED = 10_000
 
 
-def env_kwargs(task: str, args) -> dict:
-    return {"reward": RewardConfig(center_line_weight=args.center_line_weight)} if task == "gate" else {}
+def env_kwargs(task: str, args, scoring: bool = False) -> dict:
+    """Environment settings for training, or for scoring (always the real-world margin rule)."""
+    if task == "gate":
+        return {"reward": RewardConfig(center_line_weight=args.center_line_weight)}
+    if task == "orbit":
+        return {"margin_rule": "soft" if scoring else args.margin_rule}
+    return {}
 
 
 def make_env(task: str, detector: str, seed: int, kwargs: dict):
@@ -53,6 +58,17 @@ def make_env(task: str, detector: str, seed: int, kwargs: dict):
         env.reset(seed=seed)
         return env
     return _init
+
+
+UNITS = {"_s": "s", "_m": "m", "_deg": "deg"}
+
+
+def format_extra(key: str, value: float) -> str:
+    """Extra per-episode numbers: names ending in _s, _m or _deg carry that unit; others are fractions."""
+    for suffix, unit in UNITS.items():
+        if key.endswith(suffix):
+            return f"{key[:-len(suffix)].replace('_', ' ')} {value:.2f} {unit}"
+    return f"{key.replace('_', ' ')} {100 * value:.0f}%"
 
 
 def time_key(env) -> str:
@@ -156,8 +172,7 @@ class ScoredTest(BaseCallback):
                         *[f"{v:.3f}" for v in result.values()], int(is_best)])
         failures = ", ".join(f"{k[:-5].replace('_', ' ')} {100 * v:.0f}%" for k, v in result.items()
                              if k.endswith("_rate") and k != "success_rate")
-        extras = "".join(f", {k[:-2].replace('_', ' ')} {result[k]:.2f} {k[-1]}" if k[-2:] in ("_s", "_m")
-                         else f", {k.replace('_', ' ')} {100 * result[k]:.0f}%" for k in self.env.EXTRA_INFO)
+        extras = "".join(f", {format_extra(k, result[k])}" for k in self.env.EXTRA_INFO)
         print(f"[{(time.time() - self.started) / 60:5.1f} min] {self.num_timesteps:>9,} steps: "
               f"success {100 * result['success_rate']:3.0f}% (scripted {100 * self.baseline['success_rate']:.0f}%), "
               f"{failures}, time {result[self.time_key]:.1f} s{extras}{'  <- best' if is_best else ''}", flush=True)
@@ -180,6 +195,9 @@ def main():
     parser.add_argument("--learning-rate", type=float, default=3e-4, help="Starting learning rate; falls linearly to 0")
     parser.add_argument("--resume", help="Continue training from this checkpoint .zip (and its _vecnormalize.pkl) "
                                          "instead of starting fresh; --task must match")
+    parser.add_argument("--margin-rule", choices=["hard", "soft"], default="hard",
+                        help="Orbit skill, training only: whether entering the marker's safety margin ends the "
+                             "episode (hard, learns more reliably) or just costs reward (soft). Scoring always uses soft")
     parser.add_argument("--center-line-weight", type=float, default=RewardConfig.center_line_weight,
                         help="Gate skill: reward weight for distance from the gate's center line")
     args = parser.parse_args()
@@ -197,7 +215,7 @@ def main():
 
     print("Scoring the scripted baseline on the evaluation starts...", flush=True)
     kwargs = env_kwargs(args.task, args)
-    eval_env = envs.make(args.task, args.detector, **kwargs)
+    eval_env = envs.make(args.task, args.detector, **env_kwargs(args.task, args, scoring=True))
     baseline = score(eval_env, make_controller("scripted"), args.eval_episodes)
     print(f"Scripted: success {100 * baseline['success_rate']:.0f}%, time {baseline[time_key(eval_env)]:.1f} s", flush=True)
 
