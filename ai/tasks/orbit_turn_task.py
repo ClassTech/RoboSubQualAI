@@ -12,7 +12,7 @@ import numpy as np
 from ai.tasks.task_base import Task, TaskStatus
 from ai.tasks.subtask_base import Subtask, SubtaskStatus
 # Import all the building blocks
-from ai.tasks.common_subtasks import (WaitForTargetVisible, AlignToObjectX,
+from ai.tasks.common_subtasks import (SwayStraight, WaitForTargetVisible, AlignToObjectX,
                                       ApproachAndCenterObject, Stabilize,
                                       DynamicOrbitPole, SwayUntilTargetLost)
 
@@ -39,7 +39,8 @@ class OrbitTurnTask(Task):
                  orbit_width_d_gain: float = 16.0, # (NEEDS TUNING)
                  orbit_width_i_clamp: float = 0.3, # (NEEDS TUNING)
                  # ---
-                 final_sway_power: float = -0.3):    # Sway power for final move
+                 final_sway_power: float = -0.3,     # Sway power for final move
+                 final_extra_sway_seconds: float = 0.0):  # Keep swaying this long after the pole leaves the view
 
         self.target_depth = target_depth
 
@@ -96,6 +97,9 @@ class OrbitTurnTask(Task):
             # 8. Stabilize after pole is lost (ready for GateTask)
             Stabilize(duration=1.0)
         ]
+        if final_extra_sway_seconds > 0:
+            # Extra sideways distance, so the drive back to the gate clears the pole
+            self.subtasks.insert(-1, SwayStraight(duration=final_extra_sway_seconds, sway_power=final_sway_power))
         self.reset()
 
     def reset(self, search_direction: int = 1):

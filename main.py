@@ -29,8 +29,9 @@ def build_mission():
                                orbit_target_fraction=0.5,
                                orbit_sway_power=-0.5,      # Negative = right (positive sway moves the sub left)
                                orbit_yaw_gain=4.5,
-                               orbit_target_width_fraction=0.125, # ~1.7 m from the marker
-                               final_sway_power=-0.5)      
+                               orbit_target_width_fraction=0.08, # ~2.7 m from the marker, outside the 1.5 m margin
+                               final_sway_power=-0.5,
+                               final_extra_sway_seconds=3.0)  # So the drive back to the gate clears the marker      
     # ---
 
     stabilize_after_turn = StabilizeTask(duration=2.0, target_depth=MISSION_DEPTH)

@@ -14,7 +14,9 @@ Success needs both:
     it really went around (not out and back on one side)
   - handoff, measurable on the real sub: the gate is in view and the sub's
     heading has turned 180° (± HANDOFF_HEADING_DEG) since the start of the orbit
-Failures: a collision, crossing back through the gate plane early, or a timeout.
+Failures: a collision, coming within MIN_MARKER_DISTANCE_M of the marker's center
+(a safety margin for real-world handling), crossing back through the gate plane
+early, or a timeout.
 """
 import math
 import random
@@ -26,6 +28,7 @@ import numpy as np
 from sub_env import SubTaskEnv
 
 SWEEP_DEG = 270.0
+MIN_MARKER_DISTANCE_M = 1.5    # Center to center; contact is at about 0.38 m
 HANDOFF_HEADING_DEG = 45.0
 
 
@@ -52,6 +55,7 @@ class OrbitRewardConfig:
     far_m: float = 3.0
     success_bonus: float = 20.0
     collision_penalty: float = 5.0
+    too_close_penalty: float = 5.0
     wrong_way_penalty: float = 5.0
     timeout_penalty: float = 5.0
     time_penalty: float = 0.01     # Per step
@@ -59,7 +63,7 @@ class OrbitRewardConfig:
 
 
 class OrbitEnv(SubTaskEnv):
-    OUTCOMES = ("is_success", "collision", "wrong_way", "timeout")
+    OUTCOMES = ("is_success", "collision", "too_close", "wrong_way", "timeout")
     INCLUDE_MARKER = True
     ACTION_DIM = 4
 
@@ -93,6 +97,9 @@ class OrbitEnv(SubTaskEnv):
         angle = self._marker_angle()
         self.swept += _wrap(angle - self._last_angle)
         self._last_angle = angle
+        s, m = self.core.state, self.core.marker
+        if math.hypot(s.x - m.x, s.y - m.y) < MIN_MARKER_DISTANCE_M:
+            return "too_close"
         if self.new_crossings():
             return "wrong_way"
         return None
@@ -112,7 +119,7 @@ class OrbitEnv(SubTaskEnv):
     def _terminal_reward(self, outcome: str) -> float:
         rc = self.reward_cfg
         return {"success": rc.success_bonus, "collision": -rc.collision_penalty,
-                "wrong_way": -rc.wrong_way_penalty}[outcome]
+                "too_close": -rc.too_close_penalty, "wrong_way": -rc.wrong_way_penalty}[outcome]
 
     def _potential(self) -> float:
         """Sweep around the marker, then face the gate, at mission depth, without drifting far. Ground truth."""

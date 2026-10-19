@@ -88,6 +88,16 @@ The display stays optional: training runs without a window, and the same physics
 - [ ] **Evaluation videos (later):** during training, periodically record a few runs flown by the current policy as short videos.
 - [ ] **Replays (later):** save each run's path (pose, detections, actions) and play it back in the pygame window with pause and single-step.
 
+## Phase 5b: Orbit skill (marker)
+- [x] Orbit environment (`orbit_env.py`) on a shared base (`sub_env.py`); `--task orbit` in train/watch/eval.
+  - Rule: go around the marker either side and back (≥270° swept, truth), then hand off once the gate is in view with the heading turned ~180° (measurable).
+  - Sway is a 4th action: with only the forward camera (±35°), the sub must face the marker and slide around it to keep it in view.
+  - Safety margin: within 1.5 m of the marker's center counts as a failure ("too close", −5). Speed is not a priority.
+- [x] Perfect-detector orbit policy (before the margin): 100% at 14 s, but it skimmed the marker at 0.50 m (~12 cm clearance), had it in view only 41% of the loop, and got 7/50 with the noisy detector.
+- [x] Scripted orbit retuned for the margin: orbit width 0.08 of the image (~2.7 m) plus 3 s extra sway before heading back. Orbit starts: 100% perfect (~70 s), 94% noisy, no margin violations. Full mission: 38/40 noisy, 2 runs inside the margin on the return.
+- [ ] Train the orbit with the noisy detector and the 1.5 m margin (`orbit_noisy_s0`, `orbit_noisy_s1`).
+- [ ] Chain gate → orbit → gate (does the gate policy handle the return as is?) and score the whole mission against the scripted one.
+
 ## Phase 6: Export to the Pi 5 (deferred)
 - [ ] Export the weights plus the `VecNormalize` statistics, and write a plain-numpy forward pass.
 - [ ] Check that the numpy policy and the PyTorch policy give the same outputs on recorded observations.
