@@ -99,6 +99,10 @@ The display stays optional: training runs without a window, and the same physics
   - First try (`orbit_noisy_s0`/`s1`): 74/100 at best. It circled mostly blind (marker in view ~16–30% of the loop), steering from memory, and drifted inside the margin.
   - Added a cost (0.03 per step) for losing sight of the marker for more than 0.5 s while going around. Both seeds switched to facing the marker and sliding around it (~85% in view).
   - **`orbit_view_s0` best checkpoint, 100 noisy starts: 96% (4 too close, nothing else), median 27.7 s, marker in view 86%, energy 16.** The scripted orbit gets 94% at ~74 s, energy ~30. Seed 1 peaked at 73%, mostly drifting inside the margin.
+- [x] Margin as a recoverable cost (only a collision fails, as on the real sub):
+  - Training from scratch under the soft rule fails (best 13%: the policy lingers near the marker, collides or times out). Continuing the best policy under it (`orbit_recover_resume`) gives 96/100 (4 timeouts).
+  - **The original `orbit_view_s0`, trained with the margin as a hard stop, scores 100/100 under the soft rule** (median 28.1 s, 0.14 s per loop inside the margin on average, closest pass 1.09 m). Use it.
+  - Method for future retraining: train with the hard stop, judge by the real-world rule.
 - [ ] Chain gate → orbit → gate (does the gate policy handle the return as is?) and score the whole mission against the scripted one.
 
 ## Phase 6: Export to the Pi 5 (deferred)
