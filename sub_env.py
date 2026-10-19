@@ -23,7 +23,9 @@ counts as progress:
   scripted_mission()       the scripted tasks that do this skill, for comparison
 OUTCOMES lists the possible endings ("is_success", "timeout" and the
 skill's own failures); info carries them as booleans when an episode ends,
-plus time_s and energy. Collisions always end an episode.
+plus time_s and energy. Collisions always end an episode, and so does
+surfacing (as in a RoboSub run): coming back up to SURFACE_DEPTH_M after
+having been below SUBMERGED_DEPTH_M.
 """
 import random
 from typing import Callable, List, Optional
@@ -38,6 +40,8 @@ from sensor_model import SensorReadings
 from sim_core import SubSim
 
 HEADING_CHANGE_DEG = 45.0
+SUBMERGED_DEPTH_M = 0.3     # Below this, the sub counts as having dived (episodes can start near the surface)
+SURFACE_DEPTH_M = 0.05      # Back up to here after diving = surfaced, which ends the run
 DEPTH_MIN, DEPTH_MAX = 0.3, 1.9
 
 Driver = Callable[[SensorReadings, object, float], ThrusterCommands]
@@ -45,7 +49,8 @@ Driver = Callable[[SensorReadings, object, float], ThrusterCommands]
 
 class SubTaskEnv(gym.Env):
     metadata = {"render_modes": []}
-    OUTCOMES = ("is_success", "collision", "timeout")
+    OUTCOMES = ("is_success", "collision", "surfaced", "timeout")
+    SURFACED_PENALTY = 5.0
     EXTRA_INFO = ()          # Names of extra per-episode numbers from _episode_info()
     INCLUDE_MARKER = False   # Whether the observation tracks the green marker pole
     ACTION_DIM = 3           # 4 adds sway
@@ -109,6 +114,7 @@ class SubTaskEnv(gym.Env):
         self.target_heading, self.target_depth = self.readings.heading, self.readings.depth
         self.time, self.energy = 0.0, 0.0
         self._crossings_seen, self._collisions_seen = 0, 0
+        self._submerged = self.core.state.z > SUBMERGED_DEPTH_M
         self._on_reset()
         self.potential = self._potential()
         self.last_action = np.zeros(self.ACTION_DIM, dtype=np.float32)
@@ -153,8 +159,12 @@ class SubTaskEnv(gym.Env):
             self.time += dt
             if self.on_physics_step:
                 self.on_physics_step(self, cmd)
+            z = self.core.state.z
+            self._submerged = self._submerged or z > SUBMERGED_DEPTH_M
             if self.core.collision_count > self._collisions_seen:
                 outcome = "collision"
+            elif self._submerged and z <= SURFACE_DEPTH_M:
+                outcome = "surfaced"
             else:
                 outcome = self._physics_outcome()
             if outcome:
@@ -172,7 +182,7 @@ class SubTaskEnv(gym.Env):
         terminated = outcome is not None
         truncated = not terminated and self.time >= self.max_seconds - 1e-9
         if terminated:
-            reward += self._terminal_reward(outcome)
+            reward += -self.SURFACED_PENALTY if outcome == "surfaced" else self._terminal_reward(outcome)
         elif truncated:
             reward -= self.timeout_penalty
             outcome = "timeout"

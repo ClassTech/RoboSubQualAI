@@ -77,7 +77,7 @@ class OrbitRewardConfig:
 
 
 class OrbitEnv(SubTaskEnv):
-    OUTCOMES = ("is_success", "collision", "too_close", "wrong_way", "timeout")   # too_close: hard rule only
+    OUTCOMES = ("is_success", "collision", "too_close", "wrong_way", "surfaced", "timeout")   # too_close: hard rule only
     # Fraction of the loop with the marker in view; how far off center it was while in view;
     # seconds inside the safety margin; closest pass
     EXTRA_INFO = ("marker_view", "off_center_deg", "inside_margin_s", "closest_m")

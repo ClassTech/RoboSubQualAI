@@ -46,17 +46,22 @@ def yaw_effort(gains: ControllerGains, heading: float, yaw_rate: float, target_h
 
 
 def mix(surge: float, sway: float, yaw: float, heave: float, pitch: float) -> ThrusterCommands:
-    """Mixes 5-axis efforts into 6 thruster commands, scaled down together if any exceeds 1."""
+    """
+    Mixes 5-axis efforts into 6 thruster commands. The horizontal and vertical
+    thrusters are separate hardware, so each group is scaled down on its own if
+    any of its commands exceeds 1. (Scaling all six together meant hard turning
+    and sliding cut the vertical thrust, and the buoyant sub floated up.)
+    """
     cos_45 = 0.7071
     surge_cmd, sway_cmd = surge * cos_45, sway * cos_45
     c = ThrusterCommands(
         hfl=surge_cmd + sway_cmd + yaw, hfr=surge_cmd - sway_cmd - yaw,
         hal=surge_cmd - sway_cmd + yaw, har=surge_cmd + sway_cmd - yaw,
         vf=heave + pitch, vr=heave - pitch)
-    max_abs = max(1.0, abs(c.hfl), abs(c.hfr), abs(c.hal), abs(c.har), abs(c.vf), abs(c.vr))
-    if max_abs > 1.0:
-        c.hfl /= max_abs; c.hfr /= max_abs; c.hal /= max_abs
-        c.har /= max_abs; c.vf /= max_abs; c.vr /= max_abs
+    h_max = max(1.0, abs(c.hfl), abs(c.hfr), abs(c.hal), abs(c.har))
+    c.hfl /= h_max; c.hfr /= h_max; c.hal /= h_max; c.har /= h_max
+    v_max = max(1.0, abs(c.vf), abs(c.vr))
+    c.vf /= v_max; c.vr /= v_max
     return c
 
 

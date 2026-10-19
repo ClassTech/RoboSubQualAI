@@ -39,7 +39,7 @@ class RewardConfig:
 
 
 class GateEnv(SubTaskEnv):
-    OUTCOMES = ("is_success", "collision", "missed_gate", "timeout")
+    OUTCOMES = ("is_success", "collision", "missed_gate", "surfaced", "timeout")
 
     def __init__(self, detector_mode: str = "perfect", control_period: float = 0.1,
                  max_seconds: float = 60.0, start: Optional[StartConfig] = None,
