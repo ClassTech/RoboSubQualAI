@@ -38,7 +38,7 @@ class SwayTurnTask(Task):
                  target_depth: float = 1.0,
                  approach_height_fraction: float = 0.33,
                  sway_duration: float = 3.0,
-                 sway_power: float = -0.5): # Negative = Left
+                 sway_power: float = -0.5): # Negative = right
         
         self.target_depth = target_depth
         

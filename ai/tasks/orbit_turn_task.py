@@ -30,7 +30,7 @@ class OrbitTurnTask(Task):
                  target_depth: float = 1.0,
                  approach_height_fraction: float = 0.5, # Pole height as a fraction of image height
                  orbit_target_fraction: float = 0.5, # Keep pole centered during orbit
-                 orbit_sway_power: float = -0.1,     # Slow sway left
+                 orbit_sway_power: float = -0.1,     # Slow sway right (positive = left)
                  orbit_yaw_gain: float = 2.5,
                  # --- NEW Width Parameters ---
                  orbit_target_width_fraction: float = 0.156, # Target width, fraction of image width (NEEDS TUNING)

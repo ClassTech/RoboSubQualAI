@@ -13,7 +13,8 @@ One frame of the observation (all roughly in [-1, 1]); FRAME_FIELDS names each v
                gate both no longer fit), so the policy knows which way to steer.
   gate         the same five, plus the turn needed to face straight through the
                gate and the sideways distance from its center line
-  last action  whatever the policy commanded last step
+  marker       (optional, for the orbit skill) the green marker pole: the same five
+  last action  whatever the policy commanded last step (3 values, or 4 with sway)
 The policy sees the last `stack` frames concatenated, newest first, so it can
 sense its own motion from how the detections change.
 
@@ -52,10 +53,20 @@ RANGE_CONFIDENCE = {"poles": 1.0, "bottom": 1.0, "height": 0.8, "separation": 0.
 OWN_FIELDS = ["depth", "depth_rate", "sin_heading", "cos_heading", "pitch", "pitch_rate", "yaw_rate"]
 TRACK_FIELDS = ["found", "bearing", "range", "confidence", "unseen"]
 GATE_EXTRA_FIELDS = ["approach", "offset"]
-ACTION_FIELDS = ["action_turn", "action_depth", "action_surge"]
-FRAME_FIELDS = (OWN_FIELDS + [f"left_{f}" for f in TRACK_FIELDS] + [f"right_{f}" for f in TRACK_FIELDS]
-                + [f"gate_{f}" for f in TRACK_FIELDS + GATE_EXTRA_FIELDS] + ACTION_FIELDS)
-INDEX = {name: i for i, name in enumerate(FRAME_FIELDS)}   # Position of each value in the newest frame
+ACTION_FIELDS = ["action_turn", "action_depth", "action_surge", "action_sway"]
+
+
+def frame_fields(include_marker: bool = False, action_dim: int = 3) -> List[str]:
+    """Names of the values in one frame, in order."""
+    fields = (OWN_FIELDS + [f"left_{f}" for f in TRACK_FIELDS] + [f"right_{f}" for f in TRACK_FIELDS]
+              + [f"gate_{f}" for f in TRACK_FIELDS + GATE_EXTRA_FIELDS])
+    if include_marker:
+        fields += [f"marker_{f}" for f in TRACK_FIELDS]
+    return fields + ACTION_FIELDS[:action_dim]
+
+
+FRAME_FIELDS = frame_fields()                              # The gate skill's layout
+INDEX = {name: i for i, name in enumerate(FRAME_FIELDS)}   # Position of each value in its newest frame
 
 
 @dataclass
@@ -65,6 +76,8 @@ class CourseGeometry:
     pole_diameter_m: float = 0.0334     # 1in PVC
     pole_height_m: float = 1.09         # Visible length, top bar to floor
     pool_depth_m: float = 2.09          # Where the poles' bottom ends are
+    marker_diameter_m: float = 0.3
+    marker_height_m: float = 2.69       # Floor to its top, 0.6 m above the surface
 
 
 def _wrap(deg: float) -> float:
@@ -142,24 +155,30 @@ class _GateTrack(_Track):
 
 class ObservationBuilder:
     def __init__(self, camera: CameraModel, course: Optional[CourseGeometry] = None,
-                 action_dim: int = 3, stack: int = 4):
-        assert action_dim == len(ACTION_FIELDS)
+                 action_dim: int = 3, stack: int = 4, include_marker: bool = False):
+        assert action_dim in (3, 4)
         self.camera = camera
         self.course = course or CourseGeometry()
         self.stack = stack
-        self.frame_size = len(FRAME_FIELDS)
+        self.include_marker = include_marker
+        self.fields = frame_fields(include_marker, action_dim)
+        self.index = {name: i for i, name in enumerate(self.fields)}
+        self.frame_size = len(self.fields)
         self.size = self.frame_size * stack
         self.reset()
 
     def reset(self, start_heading: Optional[float] = None):
         """start_heading: heading (deg) that relative heading is measured from; None = first reading."""
         self.start_heading = start_heading
-        self.left, self.right, self.gate = _Track(), _Track(), _GateTrack()
+        self.left, self.right, self.gate, self.marker = _Track(), _Track(), _GateTrack(), _Track()
         self.frames: deque = deque(maxlen=self.stack)
 
     @property
     def tracks(self):
-        return {"left": self.left, "right": self.right, "gate": self.gate}
+        tracks = {"left": self.left, "right": self.right, "gate": self.gate}
+        if self.include_marker:
+            tracks["marker"] = self.marker
+        return tracks
 
     # --- Detections -> estimates ---
     def _estimate_pole(self, box: dict, depth: float, pitch: float) -> Estimate:
@@ -203,20 +222,35 @@ class ObservationBuilder:
         self.gate.update_geometry(geometry.approach_deg if geometry else None,
                                   geometry.offset_m if geometry else None, heading, dt)
 
+    def _update_marker(self, green_boxes: Sequence[dict], depth: float, pitch: float, heading: float, dt: float):
+        """The marker is the biggest tall green box, as in the scripted Vision."""
+        tall = [b for b in green_boxes if b['height'] > b['width'] * 1.2]
+        est = None
+        if tall:
+            c = self.course
+            est = estimate_pole(max(tall, key=lambda b: b['area']), self.camera, diameter_m=c.marker_diameter_m,
+                                height_m=c.marker_height_m, bottom_depth_m=c.pool_depth_m,
+                                camera_depth_m=depth, pitch_deg=pitch)
+        self.marker.update(est, heading, dt)
+
     # --- Main entry point ---
     def update(self, depth: float, depth_rate: float, heading: float, pitch: float,
                pitch_rate: float, yaw_rate: float, red_boxes: Sequence[dict],
-               last_action: Sequence[float], dt: float) -> np.ndarray:
+               last_action: Sequence[float], dt: float, green_boxes: Sequence[dict] = ()) -> np.ndarray:
         """Adds this step's frame and returns the stacked observation (float32, length self.size)."""
         if self.start_heading is None:
             self.start_heading = heading
         self._update_tracks(red_boxes, depth, pitch, heading, dt)
+        if self.include_marker:
+            self._update_marker(green_boxes, depth, pitch, heading, dt)
 
         rel_heading = math.radians(heading - self.start_heading)
         frame = [depth / DEPTH_SCALE, depth_rate / DEPTH_RATE_SCALE,
                  math.sin(rel_heading), math.cos(rel_heading),
                  pitch / PITCH_SCALE, pitch_rate / RATE_SCALE, yaw_rate / RATE_SCALE]
         frame += self.left.features(heading) + self.right.features(heading) + self.gate.features(heading)
+        if self.include_marker:
+            frame += self.marker.features(heading)
         frame += [float(a) for a in last_action]
         assert len(frame) == self.frame_size, (len(frame), self.frame_size)
 

@@ -243,7 +243,7 @@ class SwayUntilTargetLost(Subtask):
                  edge_margin_fraction: float = 0.1, lost_timeout: float = 5.0):
         if target_type not in ['gate', 'pole', 'either']:
              raise ValueError("target_type must be 'gate', 'pole', or 'either'")
-        self.sway_power = sway_power # Negative = Left
+        self.sway_power = sway_power # Negative = right
         self.target_type = target_type
         self.edge_margin_fraction = edge_margin_fraction
         self.lost_timeout = lost_timeout

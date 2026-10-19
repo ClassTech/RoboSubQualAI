@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-Watch a controller fly the gate environment in the pygame window: the same
-episodes, starts and noise that training and tools/eval_gate.py use.
+Watch a controller fly a skill environment (--task gate or orbit) in the pygame
+window: the same episodes, starts and noise that training and
+tools/eval_gate.py use.
 
 The panel shows the controller's action, the reward, and what the policy
-believes about the gate (from its observation) next to the truth.
+believes about the gate (and the marker, for the orbit) next to the truth.
 
 Usage:
   .venv/bin/python watch.py scripted
   .venv/bin/python watch.py straight --detector perfect
   .venv/bin/python watch.py runs/gate/best_model.zip --speed 2
+  .venv/bin/python watch.py scripted --task orbit
 
 Keys: SPACE pause, N single physics step while paused, R restart the episode,
 ENTER next episode, Q or ESC quit.
@@ -19,12 +21,11 @@ import math
 
 import pygame
 
+import envs
 from gate_controllers import ScriptedController, make_controller
-from gate_env import DEPTH_MAX, DEPTH_MIN, HEADING_CHANGE_DEG, GateEnv
 from perception import find_gate_pair
 from sim_view import SimView
-
-OUTCOME_NAMES = {"is_success": "SUCCESS", "collision": "COLLISION", "missed_gate": "MISSED GATE", "timeout": "TIMEOUT"}
+from sub_env import DEPTH_MAX, DEPTH_MIN, HEADING_CHANGE_DEG
 
 
 class _Restart(Exception): pass
@@ -35,13 +36,16 @@ class _Quit(Exception): pass
 class Viewer:
     def __init__(self, args):
         self.args = args
-        self.env = GateEnv(detector_mode=args.detector)
-        self.view = SimView(self.env.core.config, title="Gate task viewer")
-        self.controller = make_controller(args.controller)
+        self.env = envs.make(args.task, args.detector)
+        self.title = f"{args.task.capitalize()} skill viewer"
+        self.view = SimView(self.env.core.config, title=self.title)
+        self.controller = make_controller(args.controller, action_dim=self.env.ACTION_DIM)
         self.env.on_physics_step = self._on_physics_step
         self.paused = False
         self.frame = 0
-        self.tally = dict.fromkeys(OUTCOME_NAMES, 0)
+        self.outcome_names = {k: "SUCCESS" if k == "is_success" else k.replace("_", " ").upper()
+                              for k in self.env.OUTCOMES}
+        self.tally = dict.fromkeys(self.outcome_names, 0)
         self.last_outcome = ""
 
     # --- Input ---
@@ -71,7 +75,8 @@ class Viewer:
         act = self.controller.last_action
         if act is not None:
             depth = DEPTH_MIN + (act[1] + 1) / 2 * (DEPTH_MAX - DEPTH_MIN)
-            lines.append(f"Action: turn {HEADING_CHANGE_DEG * act[0]:+5.1f} deg, depth {depth:.2f} m, surge {act[2]:+.2f}")
+            sway = f", sway {act[3]:+.2f}" if len(act) > 3 else ""
+            lines.append(f"Action: turn {HEADING_CHANGE_DEG * act[0]:+5.1f} deg, depth {depth:.2f} m, surge {act[2]:+.2f}{sway}")
         rel_heading = (r.heading - env.builder.start_heading + 180) % 360 - 180 if env.builder.start_heading is not None else 0.0
         lines += [f"Sub: depth {r.depth:.2f} m, heading {rel_heading:+.0f} deg from start, pitch {r.pitch:+.1f} deg",
                   ""]
@@ -95,10 +100,19 @@ class Viewer:
                 approach = (b.gate.abs_approach - r.heading + 180) % 360 - 180
                 lines.append(f"            square-on turn {approach:+6.1f} deg, off center line {b.gate.offset_m:+5.2f} m")
         lines += [f"  truth     bearing {true_bearing:+6.1f} deg, range {math.hypot(dx, dy):5.2f} m",
-                  f"            square-on turn {true_approach:+6.1f} deg, off center line {true_offset:+5.2f} m",
-                  "",
+                  f"            square-on turn {true_approach:+6.1f} deg, off center line {true_offset:+5.2f} m"]
+        if "marker" in b.tracks:
+            m, mt = env.core.marker, b.marker
+            m_bearing = (math.degrees(math.atan2(m.y - s.y, m.x - s.x)) - s.heading + 180) % 360 - 180
+            seen = ("in view" if mt.found else f"remembered, {mt.unseen:.1f} s ago") if mt.seen_ever else "not seen yet"
+            lines.append(f"Marker: {seen}")
+            if mt.seen_ever:
+                lines.append(f"  believes  bearing {mt.bearing(r.heading):+6.1f} deg, range {mt.range_m:5.2f} m")
+            lines += [f"  truth     bearing {m_bearing:+6.1f} deg, range {math.hypot(m.x - s.x, m.y - s.y):5.2f} m",
+                      f"Swept around marker {env.swept:+5.0f} deg   handoff ready: {env.handoff_ready()}"]
+        lines += ["",
                   f"Last episode: {self.last_outcome or '-'}",
-                  "Totals: " + ", ".join(f"{OUTCOME_NAMES[k].lower()} {v}" for k, v in self.tally.items())]
+                  "Totals: " + ", ".join(f"{self.outcome_names[k].lower()} {v}" for k, v in self.tally.items())]
         return lines
 
     def _draw(self, thrusters):
@@ -106,7 +120,7 @@ class Viewer:
         self.view.draw_camera(env.core)
         red = env.detections.red_blobs if env.detections else []
         self.view.draw_boxes(red, find_gate_pair(red, env.core.camera.height))
-        self.view.render(env.core, self._lines(), thrusters, title="Gate task viewer", trail=self.trail,
+        self.view.render(env.core, self._lines(), thrusters, title=self.title, trail=self.trail,
                          controls=("SPACE - Pause", "N - Step (paused)", "R - Restart episode",
                                    "ENTER - Next episode", "Q - Quit"))
 
@@ -133,9 +147,9 @@ class Viewer:
             obs, reward, term, trunc, info = self.controller.step(env, obs)
             self.step_reward, self.total_reward = reward, self.total_reward + reward
             if term or trunc:
-                outcome = next(k for k in OUTCOME_NAMES if info[k])
+                outcome = next(k for k in self.outcome_names if info[k])
                 self.tally[outcome] += 1
-                self.last_outcome = f"{OUTCOME_NAMES[outcome]} after {info['time_s']:.1f} s, reward {self.total_reward:+.1f}"
+                self.last_outcome = f"{self.outcome_names[outcome]} after {info['time_s']:.1f} s, reward {self.total_reward:+.1f}"
                 print(f"Episode {self.episode + 1} (seed {self.seed}): {self.last_outcome}")
                 end = pygame.time.get_ticks() + 1500   # Show the end for a moment
                 while pygame.time.get_ticks() < end:
@@ -164,6 +178,7 @@ class Viewer:
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("controller", help="scripted, straight, random, or a path to a PPO model .zip")
+    parser.add_argument("--task", choices=sorted(envs.ENVS), default="gate")
     parser.add_argument("--detector", choices=["perfect", "noisy"], default="noisy")
     parser.add_argument("--seed", type=int, default=10_000, help="First episode's seed (eval seeds start at 10000)")
     parser.add_argument("--episodes", type=int, default=0, help="Stop after this many episodes (0 = keep going)")

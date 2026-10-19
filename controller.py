@@ -61,7 +61,7 @@ def mix(surge: float, sway: float, yaw: float, heave: float, pitch: float) -> Th
 
 
 class SetpointController:
-    """Holds a heading and depth at a given surge effort. Used by the policy (in sim and on the Pi)."""
+    """Holds a heading and depth at given surge and sway efforts. Used by the policy (in sim and on the Pi)."""
     def __init__(self, gains: ControllerGains = None):
         self.gains = gains or ControllerGains()
         self.reset()
@@ -71,11 +71,11 @@ class SetpointController:
 
     def update(self, dt: float, depth: float, depth_rate: float, heading: float, pitch: float,
                pitch_rate: float, yaw_rate: float, target_heading: float, target_depth: float,
-               surge: float) -> ThrusterCommands:
+               surge: float, sway: float = 0.0) -> ThrusterCommands:
         g = self.gains
         self.depth_integral = float(np.clip(self.depth_integral + (target_depth - depth) * dt,
                                             -g.depth_i_clamp, g.depth_i_clamp))
         heave, pitch_effort = depth_pitch_efforts(g, depth, depth_rate, self.depth_integral,
                                                   target_depth, pitch, pitch_rate)
         yaw = yaw_effort(g, heading, yaw_rate, target_heading)
-        return mix(float(np.clip(surge, -1.0, 1.0)), 0.0, yaw, heave, pitch_effort)
+        return mix(float(np.clip(surge, -1.0, 1.0)), float(np.clip(sway, -1.0, 1.0)), yaw, heave, pitch_effort)

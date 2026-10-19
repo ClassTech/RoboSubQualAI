@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Controllers that can fly the gate environment, shared by tools/eval_gate.py
-(scoring) and watch.py (viewing):
-  scripted   the scripted GateTask (the baseline)
+Controllers that can fly the skill environments (gate, orbit), shared by
+tools/eval_gate.py (scoring), train.py and watch.py (viewing):
+  scripted   the environment's scripted tasks (the baseline)
   random     random actions
   straight   hold the start heading at 1.5 m and drive forward
   <path>     a saved Stable-Baselines3 PPO model (.zip)
@@ -20,7 +20,7 @@ from contextlib import redirect_stdout
 
 import numpy as np
 
-from gate_env import DEPTH_MAX, DEPTH_MIN, GateEnv
+from sub_env import DEPTH_MAX, DEPTH_MIN, SubTaskEnv
 
 
 class ActionController:
@@ -28,10 +28,10 @@ class ActionController:
     def __init__(self, name, choose):
         self.name, self.choose, self.last_action = name, choose, None
 
-    def reset(self, env: GateEnv):
+    def reset(self, env: SubTaskEnv):
         self.last_action = None
 
-    def step(self, env: GateEnv, obs):
+    def step(self, env: SubTaskEnv, obs):
         self.last_action = np.asarray(self.choose(obs), dtype=np.float32)
         return env.step(self.last_action)
 
@@ -43,20 +43,19 @@ class _ImageSize:
 
 
 class ScriptedController:
-    """The scripted GateTask, driving the thrusters directly at the physics rate."""
+    """The environment's scripted tasks (env.scripted_mission()), driving the thrusters at the physics rate."""
     name, last_action = "scripted", None
 
-    def reset(self, env: GateEnv):
+    def reset(self, env: SubTaskEnv):
         from ai.submarine import Submarine
-        from ai.tasks import GateTask
         with redirect_stdout(io.StringIO()):
-            self.sub = Submarine(mission_plan=[GateTask(target_depth=1.5)])
+            self.sub = Submarine(mission_plan=env.scripted_mission())
         self.image = _ImageSize(env.core.camera.width, env.core.camera.height)
 
     def state_name(self) -> str:
         return self.sub.get_current_state_name()
 
-    def step(self, env: GateEnv, obs):
+    def step(self, env: SubTaskEnv, obs):
         from data_structures import SensorSuite
 
         def driver(r, detections, dt):
@@ -72,7 +71,7 @@ class ScriptedController:
         return env.step_with_driver(driver)
 
 
-def run_episode(env: GateEnv, controller, seed: int):
+def run_episode(env: SubTaskEnv, controller, seed: int):
     """Flies one episode. Returns the final info and the total reward."""
     obs, _ = env.reset(seed=seed)
     controller.reset(env)
@@ -97,15 +96,15 @@ def policy_controller(model, normalizer=None, name: str = "policy") -> ActionCon
     return ActionController(name, choose)
 
 
-def make_controller(name: str, seed: int = 0):
+def make_controller(name: str, seed: int = 0, action_dim: int = 3):
     if name == "scripted":
         return ScriptedController()
     if name == "random":
         rng = np.random.default_rng(seed)
-        return ActionController("random", lambda obs: rng.uniform(-1, 1, 3))
+        return ActionController("random", lambda obs: rng.uniform(-1, 1, action_dim))
     if name == "straight":
         depth_action = (1.5 - DEPTH_MIN) / (DEPTH_MAX - DEPTH_MIN) * 2 - 1   # Target 1.5 m
-        return ActionController("straight", lambda obs: np.array([0.0, depth_action, 0.6]))
+        return ActionController("straight", lambda obs: np.array([0.0, depth_action, 0.6] + [0.0] * (action_dim - 3)))
     from stable_baselines3 import PPO
     model = PPO.load(name, device="cpu")
     normalizer = None

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Trains a PPO policy on the gate environment.
+Trains a PPO policy on a skill environment (--task gate or orbit).
 
 Everything for a run goes in runs/<name>/:
   tb/                          TensorBoard logs (view with: .venv/bin/tensorboard --logdir runs)
@@ -18,7 +18,7 @@ same starts is logged alongside for comparison.
 Watch a checkpoint at any time, even while training runs:
   .venv/bin/python watch.py runs/<name>/best_model.zip
 
-Usage: .venv/bin/python train.py --name gate_perfect --detector perfect --steps 3000000
+Usage: .venv/bin/python train.py --name gate_perfect --task gate --detector perfect --steps 3000000
 """
 import argparse
 import copy
@@ -35,44 +35,55 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize
 
+import envs
 from gate_controllers import make_controller, policy_controller, run_episode, vecnormalize_path
-from gate_env import GateEnv, RewardConfig
+from gate_env import RewardConfig
 
-OUTCOME_KEYS = ("is_success", "collision", "missed_gate", "timeout")
 EVAL_SEED = 10_000
 
 
-def make_env(detector: str, seed: int, reward: RewardConfig):
+def env_kwargs(task: str, args) -> dict:
+    return {"reward": RewardConfig(center_line_weight=args.center_line_weight)} if task == "gate" else {}
+
+
+def make_env(task: str, detector: str, seed: int, kwargs: dict):
     def _init():
-        env = Monitor(GateEnv(detector_mode=detector, reward=reward), info_keywords=OUTCOME_KEYS + ("time_s", "energy"))
+        env = envs.make(task, detector, **kwargs)
+        env = Monitor(env, info_keywords=env.OUTCOMES + ("time_s", "energy"))
         env.reset(seed=seed)
         return env
     return _init
 
 
-def score(env: GateEnv, controller, episodes: int) -> dict:
+def time_key(env) -> str:
+    """Name of the median-time result (kept as time_to_gate for the gate skill, for old runs)."""
+    return "time_to_gate" if env.OUTCOMES == envs.GateEnv.OUTCOMES else "time_to_success"
+
+
+def score(env, controller, episodes: int) -> dict:
     """Flies the fixed evaluation starts and summarizes the outcomes."""
-    counts = dict.fromkeys(OUTCOME_KEYS, 0)
+    counts = dict.fromkeys(env.OUTCOMES, 0)
     times, rewards = [], []
     for i in range(episodes):
         info, total = run_episode(env, controller, EVAL_SEED + i)
-        for k in OUTCOME_KEYS:
+        for k in env.OUTCOMES:
             counts[k] += bool(info[k])
         if info["is_success"]:
             times.append(info["time_s"])
         rewards.append(total)
-    return {"success_rate": counts["is_success"] / episodes,
-            "collision_rate": counts["collision"] / episodes,
-            "missed_gate_rate": counts["missed_gate"] / episodes,
-            "timeout_rate": counts["timeout"] / episodes,
-            "time_to_gate": statistics.median(times) if times else float("nan"),
-            "mean_reward": statistics.mean(rewards)}
+    result = {"success_rate": counts["is_success"] / episodes}
+    result.update({f"{k}_rate": counts[k] / episodes for k in env.OUTCOMES if k != "is_success"})
+    result[time_key(env)] = statistics.median(times) if times else float("nan")
+    result["mean_reward"] = statistics.mean(rewards)
+    return result
 
 
 class OutcomeLogger(BaseCallback):
-    """Logs how training episodes end (collision, missed gate, timeout, time to gate) to TensorBoard."""
-    def __init__(self, window: int = 200):
+    """Logs how training episodes end (each failure kind, time to success, energy) to TensorBoard."""
+    def __init__(self, outcomes, time_name: str, window: int = 200):
         super().__init__()
+        self.outcomes = [k for k in outcomes if k != "is_success"]
+        self.time_name = time_name
         self.recent = deque(maxlen=window)
 
     def _on_step(self) -> bool:
@@ -85,20 +96,21 @@ class OutcomeLogger(BaseCallback):
         if not self.recent:
             return
         n = len(self.recent)
-        for key in ("collision", "missed_gate", "timeout"):
+        for key in self.outcomes:
             self.logger.record(f"outcomes/{key}_rate", sum(bool(i[key]) for i in self.recent) / n)
         times = [i["time_s"] for i in self.recent if i["is_success"]]
         if times:
-            self.logger.record("outcomes/time_to_gate", statistics.median(times))
+            self.logger.record(f"outcomes/{self.time_name}", statistics.median(times))
         self.logger.record("outcomes/energy", statistics.mean(i["energy"] for i in self.recent))
 
 
 class ScoredTest(BaseCallback):
     """Every eval_every steps, scores the current policy on the fixed starts and keeps the best checkpoint."""
-    def __init__(self, run_dir: str, detector: str, eval_every: int, episodes: int, baseline: dict):
+    def __init__(self, run_dir: str, env, eval_every: int, episodes: int, baseline: dict):
         super().__init__()
         self.run_dir, self.eval_every, self.episodes, self.baseline = run_dir, eval_every, episodes, baseline
-        self.env = GateEnv(detector_mode=detector)
+        self.env = env
+        self.time_key = time_key(env)
         self.next_eval = eval_every
         self.best = (-1.0, float("inf"))   # (success rate, time to gate)
         self.csv_path = os.path.join(run_dir, "eval.csv")
@@ -119,11 +131,11 @@ class ScoredTest(BaseCallback):
         for key, value in result.items():
             self.logger.record(f"eval/{key}", value)
         self.logger.record("eval/scripted_success_rate", self.baseline["success_rate"])
-        self.logger.record("eval/scripted_time_to_gate", self.baseline["time_to_gate"])
+        self.logger.record(f"eval/scripted_{self.time_key}", self.baseline[self.time_key])
         self.logger.dump(self.num_timesteps)
 
         self._save("latest_model")
-        t = result["time_to_gate"] if result["success_rate"] > 0 else float("inf")
+        t = result[self.time_key] if result["success_rate"] > 0 else float("inf")
         is_best = (result["success_rate"], -t) > (self.best[0], -self.best[1])
         if is_best:
             self.best = (result["success_rate"], t)
@@ -135,17 +147,18 @@ class ScoredTest(BaseCallback):
                 w.writerow(["steps", "minutes", *result.keys(), "best"])
             w.writerow([self.num_timesteps, f"{(time.time() - self.started) / 60:.1f}",
                         *[f"{v:.3f}" for v in result.values()], int(is_best)])
+        failures = ", ".join(f"{k[:-5].replace('_', ' ')} {100 * v:.0f}%" for k, v in result.items()
+                             if k.endswith("_rate") and k != "success_rate")
         print(f"[{(time.time() - self.started) / 60:5.1f} min] {self.num_timesteps:>9,} steps: "
               f"success {100 * result['success_rate']:3.0f}% (scripted {100 * self.baseline['success_rate']:.0f}%), "
-              f"collision {100 * result['collision_rate']:.0f}%, missed {100 * result['missed_gate_rate']:.0f}%, "
-              f"timeout {100 * result['timeout_rate']:.0f}%, time to gate {result['time_to_gate']:.1f} s"
-              f"{'  <- best' if is_best else ''}", flush=True)
+              f"{failures}, time {result[self.time_key]:.1f} s{'  <- best' if is_best else ''}", flush=True)
         return True
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--name", default="gate", help="Run directory name under runs/")
+    parser.add_argument("--task", choices=sorted(envs.ENVS), default="gate")
     parser.add_argument("--detector", choices=["perfect", "noisy"], default="perfect")
     parser.add_argument("--steps", type=float, default=3e6, help="Total environment steps (10 per simulated second)")
     parser.add_argument("--envs", type=int, default=16, help="Parallel environments")
@@ -157,7 +170,7 @@ def main():
                         help="Stop each PPO update once the policy has moved this far (KL divergence); 0 = no limit")
     parser.add_argument("--learning-rate", type=float, default=3e-4, help="Starting learning rate; falls linearly to 0")
     parser.add_argument("--center-line-weight", type=float, default=RewardConfig.center_line_weight,
-                        help="Reward weight for distance from the gate's center line")
+                        help="Gate skill: reward weight for distance from the gate's center line")
     args = parser.parse_args()
 
     run_dir = os.path.join("runs", args.name)
@@ -172,18 +185,19 @@ def main():
     torch.set_num_threads(args.threads)
 
     print("Scoring the scripted baseline on the evaluation starts...", flush=True)
-    baseline = score(GateEnv(detector_mode=args.detector), make_controller("scripted"), args.eval_episodes)
-    print(f"Scripted: success {100 * baseline['success_rate']:.0f}%, time to gate {baseline['time_to_gate']:.1f} s", flush=True)
+    kwargs = env_kwargs(args.task, args)
+    eval_env = envs.make(args.task, args.detector, **kwargs)
+    baseline = score(eval_env, make_controller("scripted"), args.eval_episodes)
+    print(f"Scripted: success {100 * baseline['success_rate']:.0f}%, time {baseline[time_key(eval_env)]:.1f} s", flush=True)
 
-    reward = RewardConfig(center_line_weight=args.center_line_weight)
-    venv = SubprocVecEnv([make_env(args.detector, args.seed * 1000 + i, reward) for i in range(args.envs)])
+    venv = SubprocVecEnv([make_env(args.task, args.detector, args.seed * 1000 + i, kwargs) for i in range(args.envs)])
     venv = VecNormalize(venv, norm_obs=True, norm_reward=True, clip_obs=10.0, gamma=hyper["gamma"])
     # Learning rate falls linearly to 0 over the run, which steadies the late updates
     model = PPO("MlpPolicy", venv, seed=args.seed, device="cpu", verbose=0,
                 tensorboard_log=os.path.join(run_dir, "tb"),
                 **{**hyper, "learning_rate": lambda progress_left: args.learning_rate * progress_left})
-    callbacks = [OutcomeLogger(),
-                 ScoredTest(run_dir, args.detector, args.eval_every, args.eval_episodes, baseline)]
+    callbacks = [OutcomeLogger(eval_env.OUTCOMES, time_key(eval_env)),
+                 ScoredTest(run_dir, eval_env, args.eval_every, args.eval_episodes, baseline)]
     print(f"Training {int(args.steps):,} steps with {args.envs} environments; logs in {run_dir}/tb", flush=True)
     model.learn(total_timesteps=int(args.steps), callback=callbacks, tb_log_name="ppo")
     model.save(os.path.join(run_dir, "final_model.zip"))
