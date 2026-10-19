@@ -78,3 +78,34 @@ class GateEnv(SubTaskEnv):
     def scripted_mission(self) -> List:
         from ai.tasks import GateTask
         return [GateTask(target_depth=1.5)]
+
+
+@dataclass
+class ReturnStartConfig:
+    """Where the orbit hands off (measured: ~10 m past the gate, 1.2-3.1 m to one side,
+    within ±24° of facing it, 1.1-1.9 m deep), a little wider. Distance and lateral are
+    measured from the gate on the far side; heading relative to facing back through it."""
+    distance_m: tuple = (8.0, 11.0)
+    lateral_m: tuple = (-3.5, 3.5)
+    heading_deg: tuple = (-30.0, 30.0)
+    depth_m: tuple = (1.1, 1.9)
+
+
+class GateReturnEnv(GateEnv):
+    """The gate skill on the way back: start where the orbit hands off and go back through."""
+
+    def __init__(self, detector_mode: str = "perfect", start: Optional[ReturnStartConfig] = None, **kwargs):
+        super().__init__(detector_mode, **kwargs)
+        self.start_cfg = start or ReturnStartConfig()
+
+    def _place_sub(self, rng: random.Random):
+        s, g, sc = self.core.state, self.core.gate, self.start_cfg
+        s.x = g.x + rng.uniform(*sc.distance_m)
+        s.y = g.center_y + rng.uniform(*sc.lateral_m)
+        s.heading = (180.0 + rng.uniform(*sc.heading_deg)) % 360
+        s.z = rng.uniform(*sc.depth_m)
+
+    def _physics_outcome(self) -> Optional[str]:
+        for c in self.new_crossings():
+            return "success" if c.inside_opening and c.direction < 0 else "missed_gate"
+        return None

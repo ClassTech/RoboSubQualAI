@@ -44,7 +44,7 @@ EVAL_SEED = 10_000
 
 def env_kwargs(task: str, args, scoring: bool = False) -> dict:
     """Environment settings for training, or for scoring (always the real-world margin rule)."""
-    if task == "gate":
+    if task in ("gate", "gate_return"):
         return {"reward": RewardConfig(center_line_weight=args.center_line_weight)}
     if task == "orbit":
         return {"margin_rule": "soft" if scoring else args.margin_rule, "practice_starts": not scoring}
@@ -73,7 +73,7 @@ def format_extra(key: str, value: float) -> str:
 
 def time_key(env) -> str:
     """Name of the median-time result (kept as time_to_gate for the gate skill, for old runs)."""
-    return "time_to_gate" if env.OUTCOMES == envs.GateEnv.OUTCOMES else "time_to_success"
+    return "time_to_gate" if isinstance(env, envs.GateEnv) else "time_to_success"
 
 
 def score(env, controller, episodes: int) -> dict:
