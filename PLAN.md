@@ -92,7 +92,7 @@ The display stays optional: training runs without a window, and the same physics
 - [x] Orbit environment (`orbit_env.py`) on a shared base (`sub_env.py`); `--task orbit` in train/watch/eval.
   - Rule: go around the marker either side and back (≥270° swept, truth), then hand off once the gate is in view with the heading turned ~180° (measurable).
   - Sway is a 4th action: with only the forward camera (±35°), the sub must face the marker and slide around it to keep it in view.
-  - Safety margin: within 1.5 m of the marker's center counts as a failure ("too close", −5). Speed is not a priority.
+  - Safety margin: 1.5 m from the marker's center. At first, crossing it ended the run ("too close", −5). Since the real sub only fails on an actual collision, it's now a cost every step inside the margin, growing with depth, so the policy learns to recover. Runs report time inside the margin and the closest pass. Speed is not a priority.
 - [x] Perfect-detector orbit policy (before the margin): 100% at 14 s, but it skimmed the marker at 0.50 m (~12 cm clearance), had it in view only 41% of the loop, and got 7/50 with the noisy detector.
 - [x] Scripted orbit retuned for the margin: orbit width 0.08 of the image (~2.7 m) plus 3 s extra sway before heading back. Orbit starts: 100% perfect (~70 s), 94% noisy, no margin violations. Full mission: 38/40 noisy, 2 runs inside the margin on the return.
 - [x] Train the orbit with the noisy detector and the 1.5 m margin.

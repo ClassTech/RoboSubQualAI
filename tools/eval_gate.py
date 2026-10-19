@@ -58,7 +58,13 @@ def main():
         print(f"  time to success: median {statistics.median(times):.1f} s, max {max(times):.1f} s")
     print(f"  reward: mean {statistics.mean(rewards):.2f}   energy: mean {statistics.mean(energies):.2f}")
     for k, values in extra.items():
-        print(f"  {k.replace('_', ' ')}: mean {100 * statistics.mean(values):.0f}%")
+        name = k.replace('_', ' ')
+        if k.endswith("_s") or k.endswith("_m"):
+            unit = k[-1]
+            print(f"  {name[:-2]}: mean {statistics.mean(values):.2f} {unit}, worst "
+                  f"{(max if unit == 's' else min)(values):.2f} {unit}")
+        else:
+            print(f"  {name}: mean {100 * statistics.mean(values):.0f}%")
 
 
 if __name__ == "__main__":

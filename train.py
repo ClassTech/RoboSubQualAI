@@ -156,7 +156,8 @@ class ScoredTest(BaseCallback):
                         *[f"{v:.3f}" for v in result.values()], int(is_best)])
         failures = ", ".join(f"{k[:-5].replace('_', ' ')} {100 * v:.0f}%" for k, v in result.items()
                              if k.endswith("_rate") and k != "success_rate")
-        extras = "".join(f", {k.replace('_', ' ')} {100 * result[k]:.0f}%" for k in self.env.EXTRA_INFO)
+        extras = "".join(f", {k[:-2].replace('_', ' ')} {result[k]:.2f} {k[-1]}" if k[-2:] in ("_s", "_m")
+                         else f", {k.replace('_', ' ')} {100 * result[k]:.0f}%" for k in self.env.EXTRA_INFO)
         print(f"[{(time.time() - self.started) / 60:5.1f} min] {self.num_timesteps:>9,} steps: "
               f"success {100 * result['success_rate']:3.0f}% (scripted {100 * self.baseline['success_rate']:.0f}%), "
               f"{failures}, time {result[self.time_key]:.1f} s{extras}{'  <- best' if is_best else ''}", flush=True)

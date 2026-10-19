@@ -14,9 +14,11 @@ Success needs both:
     it really went around (not out and back on one side)
   - handoff, measurable on the real sub: the gate is in view and the sub's
     heading has turned 180° (± HANDOFF_HEADING_DEG) since the start of the orbit
-Failures: a collision, coming within MIN_MARKER_DISTANCE_M of the marker's center
-(a safety margin for real-world handling), crossing back through the gate plane
-early, or a timeout.
+Failures: a collision, crossing back through the gate plane early, or a timeout.
+Coming within MIN_MARKER_DISTANCE_M of the marker's center (a safety margin for
+real-world handling) doesn't end the episode, since on the real sub only a
+collision would; it costs reward every step, more the closer it gets, so the
+policy learns both to stay out and to get back out.
 """
 import math
 import random
@@ -29,7 +31,7 @@ from sub_env import SubTaskEnv
 
 SWEEP_DEG = 270.0
 MARKER_GRACE_S = 0.5           # A dropout this short doesn't count as losing sight of the marker
-MIN_MARKER_DISTANCE_M = 1.5    # Center to center; contact is at about 0.38 m
+MIN_MARKER_DISTANCE_M = 1.5    # Safety margin, center to center; contact is at about 0.38 m
 HANDOFF_HEADING_DEG = 45.0
 
 
@@ -56,7 +58,8 @@ class OrbitRewardConfig:
     far_m: float = 3.0
     success_bonus: float = 20.0
     collision_penalty: float = 5.0
-    too_close_penalty: float = 5.0
+    margin_cost: float = 0.1       # Per step inside the safety margin...
+    margin_cost_depth: float = 0.5 # ...plus this much more per step, scaled by how far inside it is
     wrong_way_penalty: float = 5.0
     timeout_penalty: float = 5.0
     marker_unseen_cost: float = 0.03   # Per step without the marker in view (> MARKER_GRACE_S) while going around
@@ -65,8 +68,9 @@ class OrbitRewardConfig:
 
 
 class OrbitEnv(SubTaskEnv):
-    OUTCOMES = ("is_success", "collision", "too_close", "wrong_way", "timeout")
-    EXTRA_INFO = ("marker_view",)   # Fraction of the loop with the marker in view
+    OUTCOMES = ("is_success", "collision", "wrong_way", "timeout")
+    # Fraction of the loop with the marker in view; seconds inside the safety margin; closest pass (m)
+    EXTRA_INFO = ("marker_view", "inside_margin_s", "closest_m")
     INCLUDE_MARKER = True
     ACTION_DIM = 4
 
@@ -96,29 +100,40 @@ class OrbitEnv(SubTaskEnv):
         self.swept = 0.0                       # Signed degrees swept around the marker
         self._last_angle = self._marker_angle()
         self._loop_steps = self._loop_steps_seen = 0
+        self._inside_margin_s, self._closest = 0.0, self._marker_distance()
+
+    def _marker_distance(self) -> float:
+        s, m = self.core.state, self.core.marker
+        return math.hypot(s.x - m.x, s.y - m.y)
 
     def _going_around(self) -> bool:
         return abs(self.swept) < SWEEP_DEG
 
     def _step_cost(self) -> float:
         """Keeping the marker in view while going around is how the sub stays safe with one forward camera."""
-        if not self._going_around():
-            return 0.0
-        self._loop_steps += 1
-        seen = self.builder.marker.unseen <= MARKER_GRACE_S
-        self._loop_steps_seen += seen
-        return 0.0 if seen else self.reward_cfg.marker_unseen_cost
+        rc, cost = self.reward_cfg, 0.0
+        inside = MIN_MARKER_DISTANCE_M - self._marker_distance()
+        if inside > 0:
+            cost += rc.margin_cost + rc.margin_cost_depth * inside / MIN_MARKER_DISTANCE_M
+        if self._going_around():
+            self._loop_steps += 1
+            seen = self.builder.marker.unseen <= MARKER_GRACE_S
+            self._loop_steps_seen += seen
+            cost += 0.0 if seen else rc.marker_unseen_cost
+        return cost
 
     def _episode_info(self) -> dict:
-        return {"marker_view": self._loop_steps_seen / max(1, self._loop_steps)}
+        return {"marker_view": self._loop_steps_seen / max(1, self._loop_steps),
+                "inside_margin_s": self._inside_margin_s, "closest_m": self._closest}
 
     def _physics_outcome(self) -> Optional[str]:
         angle = self._marker_angle()
         self.swept += _wrap(angle - self._last_angle)
         self._last_angle = angle
-        s, m = self.core.state, self.core.marker
-        if math.hypot(s.x - m.x, s.y - m.y) < MIN_MARKER_DISTANCE_M:
-            return "too_close"
+        d = self._marker_distance()
+        self._closest = min(self._closest, d)
+        if d < MIN_MARKER_DISTANCE_M:
+            self._inside_margin_s += self.core.config.physicsDt
         if self.new_crossings():
             return "wrong_way"
         return None
@@ -138,7 +153,7 @@ class OrbitEnv(SubTaskEnv):
     def _terminal_reward(self, outcome: str) -> float:
         rc = self.reward_cfg
         return {"success": rc.success_bonus, "collision": -rc.collision_penalty,
-                "too_close": -rc.too_close_penalty, "wrong_way": -rc.wrong_way_penalty}[outcome]
+                "wrong_way": -rc.wrong_way_penalty}[outcome]
 
     def _potential(self) -> float:
         """Sweep around the marker, then face the gate, at mission depth, without drifting far. Ground truth."""
