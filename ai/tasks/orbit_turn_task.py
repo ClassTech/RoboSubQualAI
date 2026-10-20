@@ -18,7 +18,7 @@ from ai.tasks.common_subtasks import (SwayStraight, WaitForTargetVisible, AlignT
 
 from data_structures import SensorSuite, Vision, ThrusterCommands
 from config import SimulationConfig
-from utils import angle_diff
+from controller import angle_diff
 
 class OrbitTurnTask(Task):
     """

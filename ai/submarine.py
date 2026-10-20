@@ -10,8 +10,7 @@ from typing import Tuple, List, Optional
 from data_structures import ThrusterCommands, SensorSuite, Vision
 # ---
 from config import SimulationConfig
-from utils import angle_diff
-from controller import ControllerGains, depth_pitch_efforts, yaw_effort, mix
+from controller import ControllerGains, angle_diff, depth_pitch_efforts, yaw_effort, mix
 from ai.tasks import TaskStatus # Corrected import
 from ai.tasks.task_base import Task
 
@@ -241,24 +240,6 @@ class Submarine:
         heave, pitch = self.get_depth_pitch_commands(sensors, tz, 0.0)
         
         return self._mix_and_normalize_commands(surge, sway, yaw_cmd, heave, pitch)
-
-    def get_go_to_visual_target_commands(self, sensors: SensorSuite, 
-                                         nav_target_x: float, 
-                                         surge_power: float,
-                                         target_depth: Optional[float] = None):
-        """Holds depth (PID), applies surge, and steers yaw to a visual target."""
-        target_depth = target_depth if target_depth is not None else self.target_depth
-
-        cam_w, cam_h = sensors.camera_image.get_size()
-        pixel_error_x = nav_target_x - (cam_w / 2)
-        
-        yaw_p = -(pixel_error_x / (cam_w / 2)) * self.ALIGN_YAW_P_GAIN 
-        yaw_d = -sensors.imu.gyro_z * self.YAW_D_GAIN
-        yaw = np.clip(yaw_p + yaw_d, -1.0, 1.0)
-        
-        heave, pitch = self.get_depth_pitch_commands(sensors, target_depth, 0.0)
-        
-        return self._mix_and_normalize_commands(surge_power, 0.0, yaw, heave, pitch)
 
     def _mix_and_normalize_commands(self, surge, sway, yaw, heave, pitch) -> ThrusterCommands:
         """Mixes 5-axis commands into 6 thruster commands (shared controller.mix)."""

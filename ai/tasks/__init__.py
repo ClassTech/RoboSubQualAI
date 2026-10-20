@@ -10,8 +10,8 @@ from .task_base import Task, TaskStatus
 # Import Common Subtasks needed by other tasks
 # --- Removed DriveUntilTargetLostRight ---
 from .common_subtasks import (
-    DiveToDepth, SwayStraight, DriveUntilTargetLostForward, DynamicOrbitPole,
-    TurnToHeading, DriveStraight, Stabilize, DriveUntilTargetLost,
+    DiveToDepth, SwayStraight, DynamicOrbitPole,
+    DriveStraight, Stabilize, DriveUntilTargetLost,
     WaitForTargetVisible, AlignToObjectX,
     ApproachAndCenterObject, SwayUntilTargetLost
 )

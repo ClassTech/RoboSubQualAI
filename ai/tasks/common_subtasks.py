@@ -13,7 +13,7 @@ from ai.tasks.subtask_base import Subtask, SubtaskStatus
 from data_structures import SensorSuite, Vision, ThrusterCommands
 # ---
 from config import SimulationConfig
-from utils import angle_diff
+from controller import angle_diff
 from perception import CameraModel, bearing_deg
 # --- NO IMPORT from task_base here ---
 
@@ -63,39 +63,6 @@ class SwayStraight(Subtask):
         commands = sub.get_heading_commands(sensors, self.heading_to_hold, surge_power=0.0, sway_power=self.sway_power, target_depth=self.target_depth)
         return SubtaskStatus.RUNNING, commands
     def get_dynamic_name(self, context: Dict[str, Any]) -> str: return f"{self.name}({self.sway_power:+.1f})"
-
-# --- DriveUntilTargetLostForward Subtask ---
-# ... (DriveUntilTargetLostForward code remains the same) ...
-class DriveUntilTargetLostForward(Subtask):
-    def __init__(self, surge_power: float = 0.4, target_type: str = 'pole'):
-        if target_type not in ['gate', 'pole', 'either']: raise ValueError("target_type must be 'gate', 'pole', or 'either'")
-        self.surge_power = surge_power; self.target_type = target_type
-        self.heading_to_hold: Optional[float] = None; self.target_was_visible = False; self.target_depth: float = 0.1
-    def on_enter(self, sub: 'Submarine', sensors: SensorSuite, vision: Vision, context: Dict[str, Any]):
-        self.heading_to_hold = context.get('initial_heading', sensors.heading)
-        self.target_depth = context.get('target_depth', sensors.depth)
-        if self.target_type == 'gate': self.target_was_visible = vision.is_gate_visible()
-        elif self.target_type == 'pole': self.target_was_visible = vision.is_pole_visible()
-        else: self.target_was_visible = vision.is_gate_visible() or vision.is_pole_visible()
-        if not self.target_was_visible: print(f"WARN: DriveUntilTargetLostForward starting but target '{self.target_type}' not visible!")
-        else: print(f"INFO: DriveUntilTargetLostForward starting. Target '{self.target_type}' visible.")
-    def execute(self, sub: 'Submarine', dt: float, sensors: SensorSuite, vision: Vision, config: SimulationConfig, context: Dict[str, Any]) -> Tuple[SubtaskStatus, ThrusterCommands]:
-        if self.heading_to_hold is None: self.heading_to_hold = sensors.heading
-        currently_visible = False
-        if self.target_type == 'gate': currently_visible = vision.is_gate_visible()
-        elif self.target_type == 'pole': currently_visible = vision.is_pole_visible()
-        else: currently_visible = vision.is_gate_visible() or vision.is_pole_visible()
-        if currently_visible:
-            self.target_was_visible = True
-            commands = sub.get_heading_commands(sensors, self.heading_to_hold, self.surge_power, target_depth=self.target_depth)
-            return SubtaskStatus.RUNNING, commands
-        else:
-            if self.target_was_visible:
-                print(f"INFO: DriveUntilTargetLostForward complete. Target '{self.target_type}' lost.")
-                context['initial_heading'] = sensors.heading; return SubtaskStatus.COMPLETED, sub._get_damping_commands(sensors)
-            else:
-                print(f"ERROR: DriveUntilTargetLostForward failed. Target '{self.target_type}' never visible.")
-                return SubtaskStatus.FAILED, sub._get_damping_commands(sensors)
 
 # --- MODIFIED DynamicOrbitPole Subtask ---
 class DynamicOrbitPole(Subtask):
@@ -311,32 +278,6 @@ class SwayUntilTargetLost(Subtask):
 
 
 # --- Navigation Subtasks ---
-# ... (TurnToHeading, DriveStraight, Stabilize remain the same) ...
-class TurnToHeading(Subtask):
-    def __init__(self, absolute_degrees: Optional[float] = None, relative_degrees: Optional[float] = None, tolerance_degrees: float = 5.0):
-        if absolute_degrees is not None and relative_degrees is not None: raise ValueError("Provide either absolute_degrees or relative_degrees, not both.")
-        if absolute_degrees is None and relative_degrees is None: raise ValueError("Must provide either absolute_degrees or relative_degrees.")
-        self.absolute_degrees=absolute_degrees; self.relative_degrees=relative_degrees; self.tolerance=tolerance_degrees
-        self.target_heading: Optional[float] = None
-        self.target_depth: float = 0.1
-    def on_enter(self, sub: 'Submarine', sensors: SensorSuite, vision_data: Vision, context: Dict[str, Any]):
-        if self.absolute_degrees is not None: self.target_heading = self.absolute_degrees % 360
-        elif self.relative_degrees is not None:
-            initial_heading = context.get('initial_heading', sensors.heading); self.target_heading = (initial_heading + self.relative_degrees) % 360
-        else: self.target_heading = None
-        self.target_depth = context.get('target_depth', sensors.depth)
-    def execute(self, sub: 'Submarine', dt: float, sensors: SensorSuite, vision_data: Vision, config: SimulationConfig, context: Dict[str, Any]) -> Tuple[SubtaskStatus, ThrusterCommands]:
-        if self.target_heading is None: print("ERROR: TurnToHeading target could not be determined!"); return SubtaskStatus.FAILED, sub._get_damping_commands(sensors)
-        heading_error = angle_diff(self.target_heading, sensors.heading)
-        if abs(heading_error) < self.tolerance: return SubtaskStatus.COMPLETED, sub._get_damping_commands(sensors)
-        commands = sub.get_heading_commands(sensors, self.target_heading, surge_power=0.0, target_depth=self.target_depth)
-        return SubtaskStatus.RUNNING, commands
-    def get_dynamic_name(self, context: Dict[str, Any]) -> str:
-        if self.target_heading is not None: return f"{self.name}({self.target_heading:.0f}°)"
-        elif self.absolute_degrees is not None: return f"{self.name}(Abs {self.absolute_degrees:.0f}°)"
-        elif self.relative_degrees is not None: rel = self.relative_degrees; init = context.get('initial_heading', '?'); calc_target = f" -> {(init + rel) % 360:.0f}" if init != '?' else ""; return f"{self.name}(Rel {rel:.0f}° from {init}°{calc_target})"
-        return self.name
-
 class DriveStraight(Subtask):
     def __init__(self, duration: float, surge_power: float = 0.5):
         self.duration=duration; self.surge_power=surge_power; self.timer=0.0

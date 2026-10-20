@@ -17,7 +17,7 @@ from ai.tasks.common_subtasks import (DiveToDepth, WaitForTargetVisible, AlignTo
                                       Stabilize, DriveUntilTargetLost)
 
 from data_structures import SensorSuite, Vision, ThrusterCommands
-from utils import angle_diff
+from controller import angle_diff
 
 class GateTask(Task):
     """Navigates through the gate defined by two red poles at a target depth."""
