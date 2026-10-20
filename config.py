@@ -50,7 +50,8 @@ class SimulationConfig:
     subInertia_Z: float = 0.13  # Yaw (kg m^2). Mostly frame perimeter and thrusters.
     subInertia_Y: float = 0.09  # Pitch (kg m^2)
     
-    thrusterMaxForce: float = 0.8 # Max force per thruster (N)
+    thrusterMaxForce: float = 0.8 # Max force per thruster (N); the same forward and reverse
+    thrusterRampSec: float = 0.5  # The sub's software limits each thruster to 0.5 s from zero to full (and back)
     
     # Drag Coefficients (TUNE THESE)
     surgeDragCoeff: float = 1.5   # Forward/backward 

@@ -72,6 +72,7 @@ class SubSim:
             x=p.START_X_POS, y=c.worldHeight / 2 + self.rng.uniform(-0.5, 0.5),
             z=p.START_Z_POS, heading=0.0, pitch=0.0)
         self.true_imu = MPU6050Readings()
+        self.thrust = ThrusterCommands()   # What the thrusters are actually doing (lags the commands)
         self.sensors.reset()
         self.time = 0.0
         self._accumulator = 0.0
@@ -104,8 +105,18 @@ class SubSim:
             self._physics_step(step, commands)
             self._accumulator -= step
 
+    def _ramp(self, commands: ThrusterCommands, dt: float) -> ThrusterCommands:
+        """The sub's software limits how fast each thruster's command can change."""
+        step = dt / self.config.thrusterRampSec if self.config.thrusterRampSec > 0 else float("inf")
+        t = self.thrust
+        for name in ("hfl", "hfr", "hal", "har", "vf", "vr"):
+            cur, want = getattr(t, name), getattr(commands, name)
+            setattr(t, name, cur + max(-step, min(step, want - cur)))
+        return t
+
     def _physics_step(self, dt: float, commands: ThrusterCommands):
         c, s = self.config, self.state
+        commands = self._ramp(commands, dt)
         f_max = c.thrusterMaxForce
         f_hfl, f_hfr = commands.hfl * f_max, commands.hfr * f_max
         f_hal, f_har = commands.hal * f_max, commands.har * f_max

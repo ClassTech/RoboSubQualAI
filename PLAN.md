@@ -73,6 +73,8 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
   - Reward fix: timeouts cost −5 like other failures, and the gate bonus is +20. Both seeds then reach 97–100% by 400k steps and keep improving.
   - **Run `r3_perfect_s0` (best checkpoint, 100 eval starts): 100% with the perfect detector, median 8.8 s to the gate; 99% with the noisy detector it never trained on, median 10.0 s.** The scripted task gets 100% at 21.7 s.
 - [ ] Turn on realism one layer at a time, retraining after each: detector noise, then a thruster model (deadband, forward/reverse asymmetry, battery sag, spin-up lag), then randomized PID gains.
+  - Detector noise: done (all current policies train with the noisy detector).
+  - Thrusters (from the user): the same thrust forward and reverse; the sub's software limits each thruster to 0.5 s from zero to full and back. The ramp is modeled in `SubSim` (`thrusterRampSec`). Dead zone and battery sag are still unknown.
 - [ ] Measure the policy's success rate against the scripted baseline in the same randomized environment.
   - Perfect and noisy detectors done (above). Repeat after each realism layer.
 
