@@ -97,6 +97,17 @@ class DetectorNoiseConfig:
     falsePositivesPerSec: Tuple[float, float] = (0.0, 0.5) # Per color
     latencySec: Tuple[float, float] = (0.03, 0.15)        # Camera + processing delay
 
+# --- Per-episode variation of the sub's dynamics (training only) ---
+# Each factor is drawn uniformly from (min, max) and multiplies the nominal value, so policies
+# don't come to depend on the sim's exact numbers (PID gains get retuned in the pool; inertia,
+# drag and thrust are estimates).
+@dataclass
+class RandomizationConfig:
+    pid_scale: Tuple[float, float] = (0.7, 1.3)       # Each controller gain, independently
+    inertia_scale: Tuple[float, float] = (0.7, 1.3)   # Yaw and pitch inertia, independently
+    drag_scale: Tuple[float, float] = (0.8, 1.2)      # Each drag coefficient, independently
+    thrust_scale: Tuple[float, float] = (0.9, 1.1)    # All thrusters together
+
 # --- Pre-Qualification Course Configuration ---
 @dataclass
 class PrequalConfig:

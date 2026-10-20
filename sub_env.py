@@ -20,6 +20,10 @@ counts as progress:
   _terminal_reward(name)   bonus or penalty for how the episode ended
   _step_cost()             optional extra cost each 10 Hz step (default 0)
   _episode_info()          optional extra numbers for info at the end (named in EXTRA_INFO)
+
+With randomize=True (training), each episode scales the controller gains,
+inertia, drag and thrust by factors from config.RandomizationConfig, after the
+start is placed (so a seed gives the same start either way).
   scripted_mission()       the scripted tasks that do this skill, for comparison
 OUTCOMES lists the possible endings ("is_success", "timeout" and the
 skill's own failures); info carries them as booleans when an episode ends,
@@ -33,7 +37,8 @@ from typing import Callable, List, Optional
 import gymnasium as gym
 import numpy as np
 
-from controller import SetpointController
+from config import RandomizationConfig
+from controller import ControllerGains, SetpointController
 from core_types import ThrusterCommands
 from observation import ObservationBuilder
 from sensor_model import SensorReadings
@@ -57,13 +62,15 @@ class SubTaskEnv(gym.Env):
 
     def __init__(self, detector_mode: str = "perfect", control_period: float = 0.1,
                  max_seconds: float = 60.0, energy_penalty: float = 0.05, time_penalty: float = 0.01,
-                 progress_weight: float = 1.0, timeout_penalty: float = 5.0):
+                 progress_weight: float = 1.0, timeout_penalty: float = 5.0, randomize: bool = False):
         assert detector_mode in ("perfect", "noisy"), detector_mode
         self.detector_mode = detector_mode
         self.control_period = control_period
         self.max_seconds = max_seconds
         self.energy_penalty, self.time_penalty = energy_penalty, time_penalty
         self.progress_weight, self.timeout_penalty = progress_weight, timeout_penalty
+        self.randomize = randomize
+        self.dynamics = {}   # The factors drawn for this episode (empty when not randomizing)
         self.controller = SetpointController()
         self.on_physics_step = None   # Optional callback(env, thruster_commands) after each physics step, for viewers
         self.core = SubSim(detector_mode=detector_mode, log=None)
@@ -106,6 +113,7 @@ class SubTaskEnv(gym.Env):
         rng = random.Random(int(self.np_random.integers(2 ** 31)))
         self.core = SubSim(detector_mode=self.detector_mode, rng=rng, log=None)
         self._place_sub(rng)
+        self._vary_dynamics(rng)
 
         self.controller.reset()
         self.builder.reset()
@@ -119,6 +127,25 @@ class SubTaskEnv(gym.Env):
         self.potential = self._potential()
         self.last_action = np.zeros(self.ACTION_DIM, dtype=np.float32)
         return self._observe(), {}
+
+    def _vary_dynamics(self, rng: random.Random):
+        nominal = ControllerGains()
+        if not self.randomize:
+            self.controller.gains, self.dynamics = nominal, {}
+            return
+        rc, c = RandomizationConfig(), self.core.config
+        gains = {k: (v if k == "depth_i_clamp" else v * rng.uniform(*rc.pid_scale))
+                 for k, v in vars(nominal).items()}
+        self.controller.gains = ControllerGains(**gains)
+        d = {"inertia_yaw": rng.uniform(*rc.inertia_scale), "inertia_pitch": rng.uniform(*rc.inertia_scale),
+             "drag_surge": rng.uniform(*rc.drag_scale), "drag_sway": rng.uniform(*rc.drag_scale),
+             "drag_heave": rng.uniform(*rc.drag_scale), "drag_yaw": rng.uniform(*rc.drag_scale),
+             "drag_pitch": rng.uniform(*rc.drag_scale), "thrust": rng.uniform(*rc.thrust_scale)}
+        c.subInertia_Z *= d["inertia_yaw"]; c.subInertia_Y *= d["inertia_pitch"]
+        c.surgeDragCoeff *= d["drag_surge"]; c.swayDragCoeff *= d["drag_sway"]
+        c.heaveDragCoeff *= d["drag_heave"]; c.angularDragCoeff_Z *= d["drag_yaw"]
+        c.angularDragCoeff_Y *= d["drag_pitch"]; c.thrusterMaxForce *= d["thrust"]
+        self.dynamics = {**d, **{f"gain_{k}": gains[k] / getattr(nominal, k) for k in gains if k != "depth_i_clamp"}}
 
     # --- Acting ---
     def step(self, action):

@@ -27,11 +27,13 @@ def main():
     parser.add_argument("controller", help="scripted, random, straight, or a path to a PPO model .zip")
     parser.add_argument("--task", choices=sorted(envs.ENVS), default="gate")
     parser.add_argument("--detector", choices=["perfect", "noisy"], default="noisy")
+    parser.add_argument("--randomize", action="store_true",
+                        help="Vary PID gains, inertia, drag and thrust each episode, as in training")
     parser.add_argument("--episodes", type=int, default=50)
     parser.add_argument("--seed", type=int, default=10_000, help="First seed; evaluation seeds stay apart from training")
     args = parser.parse_args()
 
-    env = envs.make(args.task, args.detector)
+    env = envs.make(args.task, args.detector, **({"randomize": True} if args.randomize else {}))
     OUTCOMES = env.OUTCOMES
     controller = make_controller(args.controller, action_dim=env.ACTION_DIM)
     run = lambda seed: run_episode(env, controller, seed)
@@ -51,7 +53,8 @@ def main():
             extra[k].append(info[k])
 
     n = args.episodes
-    print(f"{args.controller} on {n} {args.task} episodes ({args.detector} detector, seeds {args.seed}-{args.seed + n - 1}):")
+    varied = ", varied dynamics" if args.randomize else ""
+    print(f"{args.controller} on {n} {args.task} episodes ({args.detector} detector{varied}, seeds {args.seed}-{args.seed + n - 1}):")
     failures = ", ".join(f"{k.replace('_', ' ')} {counts[k]}" for k in OUTCOMES if k != "is_success")
     print(f"  success {counts['is_success']}/{n} ({100 * counts['is_success'] / n:.0f}%), {failures}")
     if times:

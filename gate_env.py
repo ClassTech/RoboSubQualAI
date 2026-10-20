@@ -43,12 +43,12 @@ class GateEnv(SubTaskEnv):
 
     def __init__(self, detector_mode: str = "perfect", control_period: float = 0.1,
                  max_seconds: float = 60.0, start: Optional[StartConfig] = None,
-                 reward: Optional[RewardConfig] = None):
+                 reward: Optional[RewardConfig] = None, randomize: bool = False):
         self.start_cfg = start or StartConfig()
         self.reward_cfg = rc = reward or RewardConfig()
         super().__init__(detector_mode, control_period, max_seconds, energy_penalty=rc.energy_penalty,
                          time_penalty=rc.time_penalty, progress_weight=rc.progress,
-                         timeout_penalty=rc.timeout_penalty)
+                         timeout_penalty=rc.timeout_penalty, randomize=randomize)
 
     def _place_sub(self, rng: random.Random):
         s, g, sc = self.core.state, self.core.gate, self.start_cfg

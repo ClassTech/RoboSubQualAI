@@ -97,7 +97,7 @@ class OrbitEnv(SubTaskEnv):
     def __init__(self, detector_mode: str = "perfect", control_period: float = 0.1,
                  max_seconds: float = 90.0, start: Optional[OrbitStartConfig] = None,
                  reward: Optional[OrbitRewardConfig] = None, margin_rule: str = "soft",
-                 practice_starts: bool = False):
+                 practice_starts: bool = False, randomize: bool = False):
         assert margin_rule in ("soft", "hard"), margin_rule
         self.margin_rule = margin_rule
         self.practice_starts = practice_starts
@@ -105,7 +105,7 @@ class OrbitEnv(SubTaskEnv):
         self.reward_cfg = rc = reward or OrbitRewardConfig()
         super().__init__(detector_mode, control_period, max_seconds, energy_penalty=rc.energy_penalty,
                          time_penalty=rc.time_penalty, progress_weight=1.0,
-                         timeout_penalty=rc.timeout_penalty)
+                         timeout_penalty=rc.timeout_penalty, randomize=randomize)
 
     # --- Episode ---
     def _place_sub(self, rng: random.Random):

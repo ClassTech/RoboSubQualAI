@@ -75,8 +75,8 @@ class MissionEnv(SubTaskEnv):
     INCLUDE_MARKER = True
     ACTION_DIM = 4
 
-    def __init__(self, detector_mode: str = "noisy", max_seconds: float = 300.0):
-        super().__init__(detector_mode, max_seconds=max_seconds, timeout_penalty=0.0)
+    def __init__(self, detector_mode: str = "noisy", max_seconds: float = 300.0, randomize: bool = False):
+        super().__init__(detector_mode, max_seconds=max_seconds, timeout_penalty=0.0, randomize=randomize)
 
     def _place_sub(self, rng: random.Random):
         s, g = self.core.state, self.core.gate
