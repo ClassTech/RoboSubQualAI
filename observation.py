@@ -13,7 +13,9 @@ One frame of the observation (all roughly in [-1, 1]); FRAME_FIELDS names each v
                gate both no longer fit), so the policy knows which way to steer.
   gate         the same five, plus the turn needed to face straight through the
                gate and the sideways distance from its center line
-  marker       (optional, for the orbit skill) the green marker pole: the same five
+  marker       (optional, for the orbit skill) the green marker pole: the same five.
+               A sighting counts once seen MARKER_CONFIRM_FRAMES frames in a row,
+               which filters out single false detections
   last action  whatever the policy commanded last step (3 values, or 4 with sway)
 The policy sees the last `stack` frames concatenated, newest first, so it can
 sense its own motion from how the detections change.
@@ -46,6 +48,8 @@ RANGE_SCALE = 10.0        # m
 APPROACH_SCALE = 90.0     # deg
 OFFSET_SCALE = 2.0        # m
 MAX_UNSEEN = 5.0          # s; time since seen is clipped here
+MARKER_CONFIRM_FRAMES = 3 # A marker sighting counts only after this many frames in a row, so a single
+                          # false detection can't move the remembered marker (seed 10018 hit the marker)
 
 # How much each range method is trusted (perception.Estimate.method)
 RANGE_CONFIDENCE = {"poles": 1.0, "bottom": 1.0, "height": 0.8, "separation": 0.6, "width": 0.3, "none": 0.0}
@@ -92,9 +96,12 @@ class _Track:
     range_m: float = 0.0
     confidence: float = 0.0
     unseen: float = MAX_UNSEEN
+    confirm_frames: int = 1      # Sightings needed in a row before the track takes them
+    streak: int = 0
 
     def update(self, est: Optional[Estimate], heading: float, dt: float):
-        if est is None:
+        self.streak = self.streak + 1 if est is not None else 0
+        if est is None or self.streak < self.confirm_frames:
             self.found = False
             self.unseen = min(MAX_UNSEEN, self.unseen + dt)
             return
@@ -170,7 +177,8 @@ class ObservationBuilder:
     def reset(self, start_heading: Optional[float] = None):
         """start_heading: heading (deg) that relative heading is measured from; None = first reading."""
         self.start_heading = start_heading
-        self.left, self.right, self.gate, self.marker = _Track(), _Track(), _GateTrack(), _Track()
+        self.left, self.right, self.gate = _Track(), _Track(), _GateTrack()
+        self.marker = _Track(confirm_frames=MARKER_CONFIRM_FRAMES)
         self.frames: deque = deque(maxlen=self.stack)
 
     @property

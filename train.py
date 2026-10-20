@@ -53,9 +53,12 @@ def env_kwargs(task: str, args, scoring: bool = False) -> dict:
                     else {"mission_return_starts": handoffs["RETURN"]} if task == "gate" else {})
     if task in ("gate", "gate_return"):
         kwargs = {"reward": RewardConfig(center_line_weight=args.center_line_weight), **randomize, **recorded}
-        if task == "gate" and args.wide_starts and not scoring:
-            # Covers both the forward pass and the return from the orbit's handoff
-            kwargs["start"] = StartConfig(distance_m=(3.0, 11.0), lateral_m=(-3.5, 3.5), depth_m=(0.1, 1.9))
+        if task == "gate" and not scoring and (args.wide_starts or args.search_starts):
+            start = {"search_share": args.search_starts}
+            if args.wide_starts:
+                # Covers both the forward pass and the return from the orbit's handoff
+                start.update(distance_m=(3.0, 11.0), lateral_m=(-3.5, 3.5), depth_m=(0.1, 1.9))
+            kwargs["start"] = StartConfig(**start)
         return kwargs
     if task == "orbit":
         return {"margin_rule": "soft" if scoring else args.margin_rule, "practice_starts": not scoring,
@@ -218,6 +221,9 @@ def main():
     parser.add_argument("--wide-starts", action="store_true",
                         help="Gate skill, training only: starts 3-11 m out, up to 3.5 m off center, 0.1-1.9 m deep, "
                              "covering the return from the orbit as well as the forward pass")
+    parser.add_argument("--search-starts", type=float, default=0.0,
+                        help="Gate skill, training only: share of episodes turned 40-110 deg away from the gate, "
+                             "so it starts out of view and has to be found")
     parser.add_argument("--center-line-weight", type=float, default=RewardConfig.center_line_weight,
                         help="Gate skill: reward weight for distance from the gate's center line")
     args = parser.parse_args()

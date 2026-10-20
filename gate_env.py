@@ -22,6 +22,9 @@ class StartConfig:
     lateral_m: tuple = (-1.5, 1.5)        # Sideways from the gate's center line
     heading_deg: tuple = (-30.0, 30.0)    # Relative to facing the gate squarely
     depth_m: tuple = (0.1, 0.5)
+    # Search starts (training only): a share of episodes turned away so the gate starts out of view
+    search_share: float = 0.0
+    search_turn_deg: tuple = (40.0, 110.0)   # Extra heading, either way
 
 
 @dataclass
@@ -61,11 +64,14 @@ class GateEnv(SubTaskEnv):
         if self.mission_return_starts and rng.random() < self.mission_share:
             self.apply_recorded_start(rng.choice(self.mission_return_starts))
             self.expect_direction = -1
-            return
-        s.x = g.x - rng.uniform(*sc.distance_m)
-        s.y = g.center_y + rng.uniform(*sc.lateral_m)
-        s.heading = rng.uniform(*sc.heading_deg) % 360
-        s.z = rng.uniform(*sc.depth_m)
+        else:
+            s.x = g.x - rng.uniform(*sc.distance_m)
+            s.y = g.center_y + rng.uniform(*sc.lateral_m)
+            s.heading = rng.uniform(*sc.heading_deg) % 360
+            s.z = rng.uniform(*sc.depth_m)
+        if sc.search_share and rng.random() < sc.search_share:
+            # Turned away: the policy has to find the gate before it can line up
+            s.heading = (s.heading + rng.choice((-1, 1)) * rng.uniform(*sc.search_turn_deg)) % 360
 
     def _physics_outcome(self) -> Optional[str]:
         for c in self.new_crossings():
