@@ -127,7 +127,10 @@ The display stays optional: training runs without a window, and the same physics
   - **60 fresh noisy starts: learned mission 54/60 (90%), median 60 s; scripted mission 58/60 (97%), median 113 s.** The learned run spends ~5 s per run inside the marker margin (closest 0.45 m).
 - [x] Mission with the realism layers (ramp, variation): the runner's pass check now arms within 4 m. At 2.5 m it missed passes where the gate dropped out of view a little farther out, and the gate policy then turned back. Requiring the marker 45–60° off the nose before the return handoff made things worse, so the original rule stays.
   - **240 noisy starts (seeds 20000+ and 30000+, nominal and varied): learned 221 (92%) at ~70 s, scripted 228 (95%) at ~110 s.** On the fresh 30000+ starts: learned 90% / 88%, scripted 95% / 97%.
-- [ ] Possible improvements: train each skill from the starts it actually gets in the mission (record the handoffs); look at the remaining spread-out failures (collisions, missed gates, a skipped orbit).
+- [x] Smoother steering: the policies steered near bang-bang (±27–31° each step), and the sub wagged in yaw (25–33°/s). The controller now rate-limits the heading target to 30°/s: yaw rate 10–12°/s, almost no reversals, faster runs.
+- [x] Orbit swing-out (4.6–8 m early in the loop with the heading limit): the distance term in the progress measure paid back on the way in what it charged on the way out, so it didn't stop swing-outs. Added a per-step cost beyond 2.5 m and fine-tuned (`orbit_tight_ft`): early swing median 3.3 m (was 5.0), 99% / 100% (nominal / varied), ~30 s loops.
+  - Mission with `orbit_tight_ft`, fresh 30000+ starts: 53/60 nominal, 54/60 varied, median ~55 s (scripted 57–58/60, ~110 s). The return handoff also checks the marker is on the side the sub has been turning toward.
+- [ ] Remaining mission failures: orbits that wander for minutes (they reach the handoff conditions by accident; the orbit trained with a 90 s limit and starts at rest), plus a few collisions and missed gates. Next: train the orbit (and the return) from the starts the runner actually hands them, and consider an orbit timeout or recovery in the runner.
 
 ## Phase 6: Export to the Pi 5 (deferred)
 - [ ] Export the weights plus the `VecNormalize` statistics, and write a plain-numpy forward pass.
