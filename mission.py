@@ -27,9 +27,11 @@ skills in turn, switching only on things the real sub can measure:
                                     view to the side (last seen beyond the edge of the
                                     view, or not seen for MARKER_GONE_S). That last check
                                     separates the real finish (~270° around) from facing
-                                    the gate with the marker still in between. (Requiring
-                                    the marker 45-60° off the nose instead delayed the
-                                    handoff and made results worse.)
+                                    the gate with the marker still in between. And the
+                                    marker must be on the side the sub has been turning
+                                    toward: at ~100° around, facing the gate, it's on the
+                                    other side. (Requiring the marker 45-60° off the nose
+                                    instead delayed the handoff and made results worse.)
   RETURN (gate policy)   -> DONE   same pass check as GATE
 Each skill gets its own observation builder (the two policies see different
 layouts), reset when the skill takes over, as in training.
@@ -52,7 +54,7 @@ DIVE_DEPTH_M = 1.5
 DIVE_DONE_M = 1.3           # Dive is done below this...
 DIVE_STEADY_MPS = 0.1       # ...once the depth rate has settled under this
 MIN_DEPTH_M = 1.2
-ORBIT_POLICY = "runs/orbit_rand_ft/final_model.zip"
+ORBIT_POLICY = "runs/orbit_tight_ft/final_model.zip"
 
 PASS_RANGE_M = 4.0          # The gate counts as passed if last seen closer than this (2.5 m missed passes
                             # where the pair dropped out of view a little farther out)...
@@ -210,7 +212,9 @@ class MissionRunner:
             reversed_ = b.start_heading is not None and abs(_wrap(heading - b.start_heading - 180)) <= HANDOFF_HEADING_DEG
             marker_gone = (b.marker.seen_ever and (b.marker.unseen >= MARKER_GONE_S
                                                   or abs(b.marker.bearing(heading)) > HALF_FOV_DEG))
-            if b.gate.found and reversed_ and marker_gone and abs(self.turned) >= ORBIT_TURN_DEG:
+            right_side = b.marker.seen_ever and b.marker.bearing(heading) * self.turned > 0
+            if (b.gate.found and reversed_ and marker_gone and right_side
+                    and abs(self.turned) >= ORBIT_TURN_DEG):
                 self._switch(env, "RETURN")
                 o = self._update(env, self.gate_builder)
 
