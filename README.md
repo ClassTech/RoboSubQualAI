@@ -1,16 +1,21 @@
 # RoboSubQualAI
 
-A simulator for a RoboSub pre-qualification run, and a reinforcement-learning (RL) setup that trains a neural-network policy to fly the sub through the gate.
+A simulator for a RoboSub pre-qualification run, and a reinforcement-learning (RL) setup that trains neural-network policies to fly it: through the gate, around the marker, and back through the gate.
 
-The simulator started as a hand-written ("scripted") mission: dive, go through the gate, circle the marker pole, come back through the gate, surface. This repository keeps that mission working, makes the simulation realistic enough to train on, and adds the RL environment, training, evaluation and viewing tools.
+The simulator started as a hand-written ("scripted") mission: dive, go through the gate, circle the marker pole, come back through the gate, surface. This repository keeps that mission working, makes the simulation realistic enough to train on, and adds the RL environments, training, evaluation and viewing tools.
 
-**Where it stands:** on the gate task, a policy trained for about 3 minutes gets through the gate as reliably as the scripted task and more than twice as fast:
+**Where it stands:** two learned skills (gate and orbit), chained by a small hand-written runner, fly the full qualification run nearly as reliably as the scripted mission and about 35% faster. That's with a noisy detector, the thrusters' 0.5 s ramp, and the sub's gains, inertia, drag and thrust varied from run to run:
 
-| Gate task, 100 fixed test starts | Success | Time to gate (median / worst) |
+| Full mission, 240 noisy test starts (nominal and varied dynamics) | Success | Time (median) |
 |---|---|---|
-| Scripted `GateTask` | 100% | 21.7 s |
-| Trained policy, perfect detector | **100%** | **8.8 s** / 11.3 s |
-| Trained policy, noisy detector (never trained with noise) | **99%** | **10.0 s** / 16.6 s |
+| Scripted mission | 95% | ~110 s |
+| **Learned skills + mission runner** | **92%** | **~70 s** |
+
+| Skill, 100 noisy test starts | Nominal | Varied dynamics |
+|---|---|---|
+| Gate, forward | 100% | 99% |
+| Gate, return from the orbit | 96% | 96% |
+| Orbit around the marker | 97% | 99% |
 
 The plan, with what's done and what's next, is in [PLAN.md](PLAN.md). Running the policy on the real sub's Raspberry Pi is planned but deferred.
 
@@ -47,18 +52,20 @@ python3.12 -m venv .venv
 .venv/bin/python main.py                        # camera image + OpenCV, like the real sub
 .venv/bin/python main.py --detector noisy       # simulated detector with realistic noise
 
-# Watch any controller fly the gate task (same starts as the scored tests)
-.venv/bin/python watch.py scripted
-.venv/bin/python watch.py runs/r3_perfect_s0/best_model.zip --detector noisy
+# Watch the full learned mission, or one skill (same starts as the scored tests)
+.venv/bin/python watch.py mission --task mission
+.venv/bin/python watch.py scripted --task mission
+.venv/bin/python watch.py runs/gate_rand_ft2/final_model.zip --task gate
+.venv/bin/python watch.py runs/orbit_rand_ft/final_model.zip --task orbit
 
-# Train a policy (about 3 minutes to 100% with the perfect detector)
-.venv/bin/python train.py --name my_run --detector perfect --steps 1500000
+# Train a skill (--task gate | orbit; --randomize varies the dynamics; --resume fine-tunes a checkpoint)
+.venv/bin/python train.py --name my_gate --task gate --detector noisy --wide-starts --randomize --steps 2000000
 
 # Follow training in the browser at http://localhost:6006
 .venv/bin/tensorboard --logdir runs
 
-# Score a controller on 100 fixed test starts
-.venv/bin/python tools/eval_gate.py runs/my_run/best_model.zip --detector noisy --episodes 100
+# Score a controller on fixed test starts (--task gate | gate_return | orbit | mission; --randomize for varied dynamics)
+.venv/bin/python tools/eval_gate.py mission --task mission --episodes 60 --seed 30000
 ```
 
 `runs/` is not in git. A fresh clone needs a training run before `watch.py` or `eval_gate.py` have a model to load; `scripted`, `straight` and `random` work without one.
@@ -100,7 +107,7 @@ Training never draws anything. Instead of rendering a camera image and running O
 ### Two ways to fly the same course
 
 - **The scripted mission** (`main.py`, `ai/`) is a sequence of hand-written tasks and subtasks. It's the baseline the policy has to beat, and it still works end to end.
-- **The policy** (`gate_env.py`, `train.py`) currently learns only the gate part. The orbit and return trip are future work.
+- **The learned mission** (`mission.py`) runs two learned skills in turn: the gate policy (forward and return) and the orbit policy. A hand-written state machine switches between them on things the real sub can measure.
 
 Both use the same physics, sensors, detector, perception and PID loops, so comparisons between them are fair.
 
@@ -122,8 +129,12 @@ Grouped by layer, from the bottom up. Files marked **(Pi)** use only numpy and t
 | | `detector_model.py` | Simulated detector: boxes from the true pose, then noise |
 | Perception **(Pi)** | `perception.py` | Boxes → bearing and range; gate pairing; gate angle and center-line offset |
 | Control **(Pi)** | `controller.py` | Depth, pitch and heading PID loops; thruster mixer |
-| Policy input **(Pi)** | `observation.py` | Builds the policy's 108-number observation |
-| RL | `gate_env.py` | Gymnasium environment for the gate task: actions, reward, episode rules |
+| Policy input **(Pi)** | `observation.py` | Builds the policies' observations (108 numbers for the gate, 132 for the orbit) |
+| RL | `sub_env.py` | Shared base for the skill environments: actions, controller, physics loop, outcomes, dynamics variation |
+| | `gate_env.py` | Gate skill (`GateEnv`) and its return leg (`GateReturnEnv`) |
+| | `orbit_env.py` | Orbit skill: around the marker and back to facing the gate |
+| | `mission.py` | `MissionEnv` (whole run, judged on ground truth) and `MissionRunner` (the learned mission) |
+| | `envs.py` | The environments by name, for `--task` |
 | | `gate_controllers.py` | Scripted, straight, random or trained controllers, shared by tools |
 | | `train.py` | PPO training with TensorBoard logging and scored tests |
 | Scripted mission | `main.py` | Builds and runs the full scripted mission |
@@ -132,7 +143,7 @@ Grouped by layer, from the bottom up. Files marked **(Pi)** use only numpy and t
 | | `ai/tasks/` | Tasks (`GateTask`, `OrbitTurnTask`, …) and reusable subtasks |
 | | `ai/vision.py`, `data_structures.py` | OpenCV color blob detection; `Vision` picks out the gate and marker |
 | Display | `sim_view.py` | The pygame window: top view, camera view, panel, thruster bars |
-| | `watch.py` | Watch any controller fly the gate task |
+| | `watch.py` | Watch any controller fly a skill or the whole mission |
 | Tools | `tools/eval_gate.py` | Score a controller on fixed test starts |
 | | `tools/run_headless.py` | Run the full scripted mission many times without a window |
 | | `tools/check_detector.py` | Compare simulated boxes with OpenCV on the rendered image |
@@ -158,7 +169,8 @@ The sub's numbers live in `SimulationConfig`:
 | Height | 0.25 m | measured |
 | Mass | 4.0 kg, slightly buoyant (4.1 L) | assumed |
 | Thruster lever arm | 0.229 m (9") | measured |
-| Thrust | 0.8 N per thruster | assumed |
+| Thrust | 0.8 N per thruster, the same forward and reverse | assumed (symmetry measured) |
+| Thruster ramp | 0.5 s from zero to full, and back | the sub's software limit |
 | Yaw / pitch inertia | 0.13 / 0.09 kg·m² | estimated from the layout: ¾" PVC frame, 4"×9" electronics tube, 4"×6"×4" battery box on top |
 | Drag | various | assumed |
 
@@ -171,6 +183,7 @@ The sub's numbers live in `SimulationConfig`:
 - **Integration:** velocities and position integrate in world coordinates; heading and pitch integrate from their rates.
 - **Collisions** (`collision.py`): the sub is a box turned to its heading; poles and the top bar are segments with a radius. On contact, the sub returns to its last clear position and stops. Repeated bumps within half a second count as one collision.
 - **Gate passes:** every time the sub's center crosses the gate's plane, it's recorded with its direction and whether it was inside the opening.
+- **Thruster ramp:** each thruster follows its command at no more than 2.0 per second (0.5 s from zero to full), as the sub's software limits it. There's no dead zone, and no battery sag: a mission is short compared with battery life.
 
 `advance(dt, commands)` runs as many fixed steps as `dt` covers. So the graphics window, which runs at whatever frame rate it gets, and training, at exactly 0.1 s per decision, use identical physics.
 
@@ -229,9 +242,10 @@ These are the sub's PID loops, used by both the scripted tasks and the policy:
 - **Depth:** PID on the measured depth, with the derivative from the filtered depth rate.
 - **Pitch:** PD toward level.
 - **Heading:** PD toward the target heading, using the gyro for the derivative.
-- **Mixer:** turns forward, sideways, yaw, heave and pitch efforts into six thruster commands. If any command exceeds 1, all six are scaled down together.
+- **Mixer:** turns forward, sideways, yaw, heave and pitch efforts into six thruster commands. The horizontal and vertical thrusters are scaled down separately if any of their commands exceeds 1. (Scaling all six together let hard maneuvering steal vertical thrust, and the buoyant sub floated up.)
+- **Depth target rate limit:** the depth target moves toward the commanded one at no more than 0.5 m/s. A policy flipping its depth command from step to step otherwise slammed the vertical thrusters, which with the ramp set the pitch swinging.
 
-The gains are the scripted sub's tuned values. They'll be retuned in the pool, so training should vary them (see [next steps](#8-limitations-and-next-steps)).
+The pitch gain is 0.2 per degree. It was 1.0, which oscillated once the thruster ramp was modeled. The other gains are the scripted sub's tuned values. All of them will be retuned in the pool, so training varies them (see 5.2).
 
 ### 4.7 The scripted mission (`main.py`, `ai/`)
 
@@ -254,7 +268,7 @@ A mission is a list of **tasks**. Each task is a sequence of **subtasks** that p
 
 `Vision` holds a target for 0.5 s after it disappears, and only accepts a new one once it has been seen in two consecutive frames. Tasks that wait for something to leave the view only count it as gone when it was last seen at the edge of the image. So a mid-view dropout doesn't trigger them, but genuinely moving past an object does.
 
-With the noisy detector, the full mission completes 40 of 40 runs (`tools/run_headless.py`).
+The orbit circles at about 2.7 m (the marker's apparent width at 0.08 of the image), then slides 3 s more before heading back, to keep outside the 1.5 m safety margin. In `MissionEnv`, the scripted mission completes 95% of 240 noisy runs, nominal and varied, in about 110 s.
 
 ### 4.8 The gate environment (`gate_env.py`)
 
@@ -266,15 +280,17 @@ This is a [Gymnasium](https://gymnasium.farama.org/) environment: the standard i
 - up to ±30° off facing it squarely
 - 0.1–0.5 m deep
 
+Training uses wider starts (`--wide-starts`: 3–11 m, ±3.5 m, 0.1–1.9 m deep), so the same policy also handles the return from the orbit. `GateReturnEnv` (`--task gate_return`) scores that leg, starting where the orbit hands off: about 10 m past the gate, 1–3 m to one side, deep.
+
 **Actions** (three numbers from −1 to 1, ten times a second):
 
 | Action | Range | Held by |
 |---|---|---|
 | Heading change | ±45° from the current heading | heading PD loop |
-| Target depth | 0.3 to 1.9 m | depth PID loop |
+| Target depth | 0.3 to 1.9 m (never shallower than 1.2 m for the gate and orbit) | depth PID loop |
 | Surge effort | full reverse to full forward thrust | open loop (nothing measures speed) |
 
-**The episode ends** when the sub goes forward through the gate opening (success), hits a pole or the bar, crosses the gate line anywhere else, or reaches 60 s.
+**The episode ends** when the sub goes forward through the gate opening (success), hits a pole or the bar, crosses the gate line anywhere else, surfaces (after having dived below 0.3 m, as surfacing ends a RoboSub run), or reaches 60 s.
 
 **Reward:**
 
@@ -282,7 +298,7 @@ This is a [Gymnasium](https://gymnasium.farama.org/) environment: the standard i
 |---|---|
 | Every step | +1 per meter closer to the gate, −0.01 time cost, −0.05 per second of full thrust (energy) |
 | Through the gate | +20 |
-| Collision, missed gate, or timeout | −5 |
+| Collision, missed gate, surfacing, or timeout | −5 |
 
 "Closer" combines three distances:
 - the horizontal distance to the gate's center
@@ -312,6 +328,32 @@ Each decision, the policy sees four frames of 27 numbers: the current one and th
 **Pole identity.** Close to the gate, the two poles no longer fit in the view. A lone pole is labeled left or right by whichever pole was last seen nearest to it. With no memory yet, the label comes from which side of the image it's on: a pole near the left edge is probably the *right* pole, with its partner out of view beyond that edge. Checked against ground truth, the label is correct 100% of the time with the perfect detector and 91% with noise. The noisy misses are dropouts, where there's genuinely no way to tell.
 
 **Relative heading.** Heading is measured from the start of the run, not from magnetic north, so the policy can't memorize which compass direction the gate happens to be in.
+
+**Orbit layout.** The orbit's observation adds a marker track (the same five values), and its last action has four values (with sway): 33 per frame, 132 stacked.
+
+### 4.10 The orbit environment (`orbit_env.py`)
+
+Start 1–5 m past the gate at mission depth, go around the marker on either side, and come back facing the gate.
+
+- **Sway is a fourth action.** The only camera faces forward (±35°). To keep the marker in view while going around it, the sub faces the marker and slides sideways around it, the same idea as the scripted orbit. Without sway it can only circle nose-first, blind to the marker.
+- **Success** needs both: at least 270° swept around the marker (ground truth), and a handoff the real sub can measure: the gate in view, with the heading turned about 180° since the orbit began.
+- **Safety margin:** 1.5 m from the marker's center (contact is at about 0.38 m). For scoring, as on the real sub, only a collision fails: inside the margin costs reward every step, more the deeper it gets. For training, entering the margin ends the episode (`--margin-rule hard`); policies learn to stay clear far more reliably that way.
+- **Reward:** progress around the marker, then facing the gate; staying at depth; a cost each step for how far off center the marker is in the camera view, so the policy keeps it centered; +20 on success, −5 for a collision, crossing back through the gate early, surfacing or a timeout.
+- **Practice starts:** a third of training episodes start 150–300° around the marker, so the policy gets plenty of practice at the last step: stop facing the marker and turn to the gate.
+
+### 4.11 The learned mission (`mission.py`)
+
+`MissionRunner` is a small hand-written state machine. The learned skills do the flying; it only decides when to switch, using what the real sub can measure:
+
+| Phase | Who flies | Ends when |
+|---|---|---|
+| DIVE | scripted: hold heading, dive to 1.5 m | depth below 1.3 m and steady |
+| GATE | gate policy | the gate was last seen within 4 m, then unseen for 3 s |
+| CLEAR | scripted: straight ahead 3 s at 1.5 m | 3 s up (keeps the orbit clear of the top bar) |
+| ORBIT | orbit policy | gate in view, heading turned ~180° (and ≥135° in total), marker gone from view to the side |
+| RETURN | gate policy | same pass check as GATE |
+
+`MissionEnv` starts where the scripted mission does (3 m before the gate, at the surface) and judges the whole run on ground truth: forward through the opening, at least 270° around the marker, then back through the opening.
 
 ---
 
@@ -344,6 +386,8 @@ Both networks are two layers of 128. The policy has about 30,000 numbers, which 
 | `target_kl` | 0.03 | Stops an update once the policy has moved this far |
 | Entropy bonus | 0.005 | Keeps some exploration |
 | Normalization | `VecNormalize` on observations and rewards | Saved with every checkpoint |
+| Dynamics variation (`--randomize`) | each PID gain ×0.7–1.3, yaw and pitch inertia ×0.7–1.3, each drag coefficient ×0.8–1.2, thrust ×0.9–1.1, drawn per episode | Gains get retuned in the pool; the rest are estimates. Scored tests stay nominal |
+| Fine-tuning (`--resume`) | continue from a checkpoint, usually at learning rate 1×10⁻⁴ | Adapting to a new realism layer is much faster than starting over |
 
 ### 5.3 What a run produces
 
@@ -384,6 +428,11 @@ A typical successful run: timeouts vanish first (it learns to move), then misses
 | `gate_perfect_v2`, `gate_noisy_v2` | Separate pole tracks, gate angle, center-line reward | 23% / 10% (unstable training; see 6.4) |
 | `stable_perfect_s1` | + `target_kl` and learning-rate decay | 80%, holding |
 | `r3_perfect_s0`, `r3_perfect_s1` | + timeout penalty, gate bonus +20 | **100% / 97–100%, from 400k steps** |
+| `gate_wide_s0`, `gate_wide_s1` | Wide starts, noisy detector | 95–99% forward, 95–97% return |
+| `orbit_noisy_*`, `orbit_view_*`, `orbit_center_*` | Orbit; then visibility and centering costs | Up to 100%, but flown at the surface (mixer bug, 6.7) |
+| `orbit_practice_s1` | Fixed mixer, practice starts | 99% |
+| `gate_ramp_ft`, `orbit_ramp_ft` | Fine-tuned with the thruster ramp | Gate 95% / 91%, orbit ~90% |
+| **`gate_rand_ft2`, `orbit_rand_ft`** | Fine-tuned with dynamics variation and the 1.2 m depth floor | **Gate 100% / 96%, orbit 97% (nominal); about the same varied** |
 
 ---
 
@@ -411,7 +460,36 @@ Observation v2 went in together with a reward change and a training-setup change
 
 With the stability fix, one seed still settled on hovering near the gate until time ran out. Timing out cost nothing, while trying and missing cost −5. Making timeouts cost the same as other failures, and raising the gate bonus to +20, removed that safe-but-useless option. Both seeds then reached 97–100%.
 
-### 6.6 Sim-only shortcuts are labeled
+### 6.6 Look at what a policy actually does
+
+Twice, a policy that scored well was doing something we didn't want:
+- The first orbit policy skimmed the marker with about 12 cm of clearance, flying mostly blind.
+- Every early orbit policy flew its loop at the surface, because of the mixer bug (6.7).
+
+Scores alone didn't show either one. Watching runs, and measuring things the scores ignore (clearance, how centered the marker stays, depth at the handoff), did.
+
+### 6.7 Check the low-level loops whenever the physics changes
+
+- **Mixer:** scaling all six thrusters together let hard maneuvering steal vertical thrust, and the sub floated to the surface.
+- **Pitch gain:** after adding the thruster ramp, the pitch gain tuned for instant thrust oscillated, and nothing could dive.
+- **Depth commands:** a policy flipping its depth command step to step made the pitch swing and lost depth.
+
+Each looked like a policy failure at first. Each was fixed in the shared controller, not by retraining.
+
+### 6.8 Practice the hard part
+
+The orbit policies kept going around but never learned the last step: stop facing the marker and turn to the gate. Starting a third of training episodes partway around the marker gave them that practice, and they learned it.
+
+### 6.9 Hand-offs need care
+
+Each skill was trained to end on ground truth. The runner has to switch on measurable cues instead, and most of the learned mission's failures came from those cues, not the skills:
+- **Switching to the orbit too early:** the gate leaves the camera's view 1.5–2 m out, and the sub slows to about 0.5 m/s there.
+- **Never detecting the pass:** the pass check was armed only within 2.5 m.
+- **Handing back with the marker in between.**
+
+Matching the training conditions helped too: the depth floor, and the dive before the gate.
+
+### 6.10 Sim-only shortcuts are labeled
 
 Wherever the simulator uses information the real sub doesn't have, it's labeled **SIM ONLY**:
 - ground truth in the scripted hover and damping helpers
@@ -438,19 +516,16 @@ None of it reaches the policy's observation.
 
 ## 8. Limitations and next steps
 
-**Not modeled yet:**
-- **Thrusters:** no dead zone, forward/reverse difference, battery sag or spin-up delay. Thrust is linear and instant.
-- **Robustness:** PID gains and inertia are fixed rather than varied between runs.
+**Not modeled:**
 - **Occlusion:** one object hiding another isn't modeled in the simulated detector.
 - **Pitch:** collision boxes ignore it.
-- **The policy only does the gate.** The marker orbit and return trip are scripted only.
+- **Currents** and the sub's exact drag are guesses (drag is varied ±20% in training).
 
-**Next** (details in [PLAN.md](PLAN.md)), one layer at a time, retraining after each:
-1. Train with the noisy detector. The current policy already scores 99% with it untrained.
-2. Add a thruster model.
-3. Vary PID gains and inertia (about ±30%) each run.
+**Open:**
+- **The learned mission's remaining failures** (about 8% on fresh starts) are spread out: a few collisions, missed gates and a skipped orbit. The most direct next step is training each skill from the starts it actually gets in the mission.
+- **Scripted baseline:** the scripted tasks still use ground truth in a few SIM ONLY helpers, so it's somewhat flattered.
 
-After that, once it's needed: export the policy and its normalization to numpy, and check that the Pi's output matches PyTorch's.
+**Later:** export the policies and their normalization to numpy for the Pi, and check that the Pi's output matches PyTorch's. Deferred for now; see [PLAN.md](PLAN.md).
 
 ### History
 
