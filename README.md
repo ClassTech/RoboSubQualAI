@@ -21,9 +21,9 @@ On fresh test starts, with the noisy detector:
 | Full mission | Success, nominal | Success, varied dynamics | Typical time |
 |---|---|---|---|
 | Scripted mission | 57/60 | 58/60 | ~110 s |
-| **Learned skills + runner** | **53/60** | **54/60** | **~55 s** |
+| **Learned skills + runner** | **59/60** | **57/60** | **~57 s** |
 
-The learned mission takes about half the time and is nearly as reliable. Its remaining failures are mostly orbits that wander. The current work is training each skill from the exact states the runner hands it.
+The learned mission is as reliable as the scripted one and takes about half the time. Training each skill from the exact states the runner hands it (recorded from real missions) was the last big step. The remaining failures are a few missed gates and one skipped orbit.
 
 Running the policies on the sub's Raspberry Pi is planned but deferred.
 
@@ -46,8 +46,8 @@ python3.12 -m venv .venv
 # Watch the learned mission, the scripted one, or a single skill
 .venv/bin/python watch.py mission --task mission
 .venv/bin/python watch.py scripted --task mission
-.venv/bin/python watch.py runs/gate_rand_ft2/final_model.zip --task gate
-.venv/bin/python watch.py runs/orbit_tight_ft/final_model.zip --task orbit
+.venv/bin/python watch.py runs/gate_mstart_ft/final_model.zip --task gate
+.venv/bin/python watch.py runs/orbit_mstart_ft/final_model.zip --task orbit
 
 # Train a skill (--task gate | orbit; --randomize varies the dynamics; --resume fine-tunes)
 .venv/bin/python train.py --name my_gate --task gate --detector noisy --wide-starts --randomize --steps 2000000
