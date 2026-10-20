@@ -50,12 +50,12 @@ import numpy as np
 from observation import ObservationBuilder
 from sub_env import SubTaskEnv
 
-GATE_POLICY = "runs/gate_mstart_ft/final_model.zip"
+GATE_POLICY = "runs/gate_search_ft/final_model.zip"
 DIVE_DEPTH_M = 1.5
 DIVE_DONE_M = 1.3           # Dive is done below this...
 DIVE_STEADY_MPS = 0.1       # ...once the depth rate has settled under this
 MIN_DEPTH_M = 1.2
-ORBIT_POLICY = "runs/orbit_mstart_ft/final_model.zip"
+ORBIT_POLICY = "runs/orbit_confirm_ft/final_model.zip"
 
 PASS_RANGE_M = 4.0          # The gate counts as passed if last seen closer than this (2.5 m missed passes
                             # where the pair dropped out of view a little farther out)...

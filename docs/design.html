@@ -110,7 +110,7 @@
 </nav>
 
 <h2 id="summary">Summary</h2>
-<p class="lede">Two learned skills, joined by a small hand-written runner, fly the RoboSub qualification run in simulation in about 57 s. The scripted mission takes about 110 s. On fresh test starts both succeed about 97% of the time (116 and 115 of 120).</p>
+<p class="lede">Two learned skills, joined by a small hand-written runner, fly the RoboSub qualification run in simulation in about 56 s. The scripted mission takes about 110 s. On fresh test starts the learned run succeeds 118 times in 120, the scripted one 115.</p>
 <p>The run is: dive, pass through the gate, go around the marker pole, and come back through the gate. A gate policy and an orbit policy each learned their part by reinforcement learning (PPO). The runner switches between them on cues the real sub can measure.</p>
 <p>Five ideas shape the design:</p>
 <ol>
@@ -528,21 +528,21 @@
 <div class="table-wrap"><table>
   <thead><tr><th></th><th class="num">Nominal</th><th class="num">Varied</th><th class="num">Time (median)</th></tr></thead>
   <tbody>
-    <tr class="hl"><td>Learned skills + runner</td><td class="num">59/60 (98%)</td><td class="num">56/60 (93%)</td><td class="num">~57 s</td></tr>
+    <tr class="hl"><td>Learned skills + runner</td><td class="num">59/60 (98%)</td><td class="num">59/60 (98%)</td><td class="num">~56 s</td></tr>
     <tr><td>Scripted mission</td><td class="num">57/60 (95%)</td><td class="num">58/60 (97%)</td><td class="num">~110 s</td></tr>
   </tbody>
 </table></div>
-<p>The learned mission had no collisions, surfacings or timeouts on these starts. Its failures were missed gates on the return and one skipped orbit. On the 10000+ starts it went 60 for 60.</p>
+<p>The learned mission had no missed gates, surfacings or timeouts on these starts; each set had one collision. Before the gate learned to search, its failures were mostly missed gates on the return.</p>
 <h3>Each skill, 100 test starts</h3>
 <div class="table-wrap"><table>
   <thead><tr><th>Skill</th><th class="num">Nominal</th><th class="num">Varied</th><th class="num">Time (median)</th></tr></thead>
   <tbody>
     <tr><td>Gate, forward</td><td class="num">100%</td><td class="num">98%</td><td class="num">8.1 s</td></tr>
-    <tr><td>Gate, return</td><td class="num">95%</td><td class="num">95%</td><td class="num">11.9 s</td></tr>
+    <tr><td>Gate, return</td><td class="num">94%</td><td class="num">95%</td><td class="num">11.9 s</td></tr>
     <tr><td>Orbit</td><td class="num">99%</td><td class="num">100%</td><td class="num">30 s</td></tr>
   </tbody>
 </table></div>
-<p>The mission uses <code>gate_mstart_ft</code> and <code>orbit_mstart_ft</code>, both fine-tuned from states recorded at real mission handoffs. The orbit row is for the previous orbit, <code>orbit_tight_ft</code>; the new one scored 100% on the nominal test starts during training.</p>
+<p>The mission uses <code>gate_search_ft</code> and <code>orbit_confirm_ft</code>: fine-tuned from states recorded at real mission handoffs, then with search starts (gate) and confirmed marker sightings (orbit). The varied gate rows and the orbit row are for earlier versions; the current orbit scored 100% on the nominal test starts during training.</p>
 <h3>How the scores were reached</h3>
 <div class="table-wrap"><table>
   <thead><tr><th>Step</th><th>Effect</th></tr></thead>
@@ -559,7 +559,7 @@
     <tr><td>Heading and depth rate limits</td><td>no more yaw wag or pitch-driven surfacing</td></tr>
     <tr><td>Swing-out cost</td><td>orbit tight at 3.3 m (was 5.0 m)</td></tr>
     <tr><td>Both skills fine-tuned from recorded mission handoffs</td><td>learned mission ~89% → 97%, no more wandering orbits</td></tr>
-    <tr><td>Marker sightings confirmed over 3 frames</td><td>no more phantom-marker collisions (seed 10018)</td></tr>
+    <tr><td>Marker sightings confirmed over 3 frames; gate search starts</td><td>learned mission 115 → 118 of 120; no more missed gates on the return</td></tr>
   </tbody>
 </table></div>
 
@@ -626,7 +626,7 @@
 <ul>
   <li>Not modeled: one object hiding another from the camera; pitch in the collision box; currents. Drag is a guess, varied ±20% in training.</li>
   <li>The scripted baseline still uses ground truth in a few SIM ONLY helpers, which flatters it slightly.</li>
-  <li>The remaining learned-mission failures are mostly on the return: after losing the gate, the gate policy sometimes drifts instead of searching. Search starts are the fix being trained.</li>
+  <li>The learned mission's remaining failures are rare collisions. Searching for an out-of-view gate is better but not yet reliable (44 of 60 forward, 41 of 60 on the return).</li>
   <li>Later: export the actors and their normalization to numpy for the Pi, and check its outputs match PyTorch's.</li>
   <li>The old competition course objects are kept in <code>world.py</code> for a possible full-course task.</li>
 </ul>
