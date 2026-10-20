@@ -2,7 +2,7 @@
 
 A simulator for a RoboSub pre-qualification run, and a reinforcement-learning (RL) setup that trains neural-network policies to fly it: dive, go through the gate, circle the marker, and come back through the gate.
 
-**How everything works**, from the big picture down to the details, is in the [design document](https://claude.ai/code/artifact/4c643eee-b71b-48ec-9d3a-662b91e2e9ff). The step-by-step plan and progress log are in [PLAN.md](PLAN.md).
+**How everything works**, from the big picture down to the details, is in the design document, [docs/design.html](docs/design.html) (open it in a browser; GitHub shows HTML as source). The step-by-step plan and progress log are in [PLAN.md](PLAN.md).
 
 ## What it does
 
