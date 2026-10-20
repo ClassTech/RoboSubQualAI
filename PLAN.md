@@ -112,7 +112,8 @@ The display stays optional: training runs without a window, and the same physics
   - Fix: a third of training episodes start 150–300° around the marker (practice starts); face-the-gate reward 2 → 4.
   - **`orbit_practice_s1` (chosen), 100 noisy starts: 99% (1 collision), median 36.2 s, marker 7.6° off center, in view 84%. Hands off ~10 m past the gate, 1.2–3.1 m to one side, within ±24° of facing it, 1.1–1.9 m deep.** Seed 0 peaked at 23%.
 - [x] Gate return (`--task gate_return`, starts where the orbit hands off): the gate policy `r3_perfect_s0` gets 77–78% (collisions and misses from far, angled approaches); the scripted gate task 96%.
-- [ ] Retrain the gate on wide starts covering both legs (3–11 m, ±3.5 m off center, 0.1–1.9 m deep; `--wide-starts`), with the noisy detector: `gate_wide_s0`, `gate_wide_s1`. Score on forward and return starts.
+- [x] Retrain the gate on wide starts covering both legs (3–11 m, ±3.5 m off center, 0.1–1.9 m deep; `--wide-starts`), with the noisy detector. Both seeds learned (~0.8M steps).
+  - 100 noisy starts, forward / return: `gate_wide_s0` 95% / 97%; **`gate_wide_s1` (chosen) 99% / 95%**, ~10 s / ~14 s. Failures are collisions with a pole on angled approaches. Scripted gate: 100% / 96% at ~22 s.
 - [ ] Chain gate → orbit → gate and score the whole mission against the scripted one.
 
 ## Phase 6: Export to the Pi 5 (deferred)
