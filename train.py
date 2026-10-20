@@ -37,7 +37,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize
 
 import envs
 from gate_controllers import make_controller, policy_controller, run_episode, vecnormalize_path
-from gate_env import RewardConfig
+from gate_env import RewardConfig, StartConfig
 
 EVAL_SEED = 10_000
 
@@ -45,7 +45,11 @@ EVAL_SEED = 10_000
 def env_kwargs(task: str, args, scoring: bool = False) -> dict:
     """Environment settings for training, or for scoring (always the real-world margin rule)."""
     if task in ("gate", "gate_return"):
-        return {"reward": RewardConfig(center_line_weight=args.center_line_weight)}
+        kwargs = {"reward": RewardConfig(center_line_weight=args.center_line_weight)}
+        if task == "gate" and args.wide_starts and not scoring:
+            # Covers both the forward pass and the return from the orbit's handoff
+            kwargs["start"] = StartConfig(distance_m=(3.0, 11.0), lateral_m=(-3.5, 3.5), depth_m=(0.1, 1.9))
+        return kwargs
     if task == "orbit":
         return {"margin_rule": "soft" if scoring else args.margin_rule, "practice_starts": not scoring}
     return {}
@@ -198,6 +202,9 @@ def main():
     parser.add_argument("--margin-rule", choices=["hard", "soft"], default="hard",
                         help="Orbit skill, training only: whether entering the marker's safety margin ends the "
                              "episode (hard, learns more reliably) or just costs reward (soft). Scoring always uses soft")
+    parser.add_argument("--wide-starts", action="store_true",
+                        help="Gate skill, training only: starts 3-11 m out, up to 3.5 m off center, 0.1-1.9 m deep, "
+                             "covering the return from the orbit as well as the forward pass")
     parser.add_argument("--center-line-weight", type=float, default=RewardConfig.center_line_weight,
                         help="Gate skill: reward weight for distance from the gate's center line")
     args = parser.parse_args()
