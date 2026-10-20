@@ -66,18 +66,32 @@ def mix(surge: float, sway: float, yaw: float, heave: float, pitch: float) -> Th
 
 
 class SetpointController:
-    """Holds a heading and depth at given surge and sway efforts. Used by the policy (in sim and on the Pi)."""
-    def __init__(self, gains: ControllerGains = None):
+    """
+    Holds a heading and depth at given surge and sway efforts. Used by the policy (in sim and on the Pi).
+
+    The target depth moves toward the commanded one at no more than
+    max_depth_target_rate m/s. A policy that flips its depth command from step to
+    step otherwise slams the vertical thrusters between extremes, which with the
+    thrusters' 0.5 s ramp set the pitch swinging and lost depth.
+    """
+    def __init__(self, gains: ControllerGains = None, max_depth_target_rate: float = 0.5):
         self.gains = gains or ControllerGains()
+        self.max_depth_target_rate = max_depth_target_rate
         self.reset()
 
     def reset(self):
         self.depth_integral = 0.0
+        self.depth_target = None   # The rate-limited target actually being held
 
     def update(self, dt: float, depth: float, depth_rate: float, heading: float, pitch: float,
                pitch_rate: float, yaw_rate: float, target_heading: float, target_depth: float,
                surge: float, sway: float = 0.0) -> ThrusterCommands:
         g = self.gains
+        if self.depth_target is None:
+            self.depth_target = target_depth
+        step = self.max_depth_target_rate * dt
+        self.depth_target += float(np.clip(target_depth - self.depth_target, -step, step))
+        target_depth = self.depth_target
         self.depth_integral = float(np.clip(self.depth_integral + (target_depth - depth) * dt,
                                             -g.depth_i_clamp, g.depth_i_clamp))
         heave, pitch_effort = depth_pitch_efforts(g, depth, depth_rate, self.depth_integral,
