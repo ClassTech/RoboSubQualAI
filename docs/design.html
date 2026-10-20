@@ -102,7 +102,7 @@
     <li><a href="#training">How training works</a></li>
     <li><a href="#skills">The skills</a></li>
     <li><a href="#rewards">Reward weights</a></li>
-    <li><a href="#runner">The mission runner</a></li>
+    <li><a href="#runner">The mission runner and done detectors</a></li>
     <li><a href="#results">Results</a></li>
     <li><a href="#lessons">Lessons and design decisions</a></li>
     <li><a href="#reference">Reference</a></li>
@@ -110,15 +110,15 @@
 </nav>
 
 <h2 id="summary">Summary</h2>
-<p class="lede">Two learned skills, joined by a small hand-written runner, fly the RoboSub qualification run in simulation in about 56 s. The scripted mission takes about 110 s. On fresh test starts the learned run succeeds 118 times in 120, the scripted one 115.</p>
-<p>The run is: dive, pass through the gate, go around the marker pole, and come back through the gate. A gate policy and an orbit policy each learned their part by reinforcement learning (PPO). The runner switches between them on cues the real sub can measure.</p>
+<p class="lede">Two learned skills fly the RoboSub qualification run in simulation in about 55 s. The scripted mission takes about 110 s. On fresh test starts the learned run succeeds 119 times in 120, the scripted one 115.</p>
+<p>The run is: dive, pass through the gate, go around the marker pole, and come back through the gate. A gate policy and an orbit policy each learned their part by reinforcement learning (PPO). Each skill also has a small learned done detector that says when its job is finished, so the runner only puts them in order.</p>
 <p>Five ideas shape the design:</p>
 <ol>
   <li><strong>Train only on what the real sub can sense.</strong> The policies see camera detections, depth, heading, pitch and turn rates, never the simulator's true position or speed.</li>
   <li><strong>The policy sets targets; the sub's own control loops fly them.</strong> Ten times a second it picks a turn, a depth, a forward thrust and (for the orbit) a sideways thrust.</li>
   <li><strong>Skip the rendering when training.</strong> A simulated detector computes the boxes the camera would see, so training runs about 290 times faster than real time.</li>
   <li><strong>Make the simulation hard on purpose.</strong> Noisy detections, a 0.5 s thruster ramp, and gains, inertia, drag and thrust varied every run keep the policies from depending on the sim's exact numbers.</li>
-  <li><strong>Train skills separately and join them at measurable handoffs.</strong> Each skill is trained, tested and watched on its own; the runner only decides when to switch.</li>
+  <li><strong>Train skills separately, and let each one say when it's done.</strong> Each skill is trained, tested and watched on its own. Its done detector, learned from labeled flights, decides when to hand over; there are no hand-written switching rules.</li>
 </ol>
 <p>Running the policies on the sub's Raspberry Pi is planned but deferred. The perception, observation and control code is already written to run there unchanged.</p>
 
@@ -182,7 +182,7 @@
 <h3>Two ways to fly the course</h3>
 <ul>
   <li><strong>The scripted mission</strong> (<code>main.py</code>, <code>ai/</code>) is a hand-written sequence of tasks: dive, align with the gate, drive through, approach and circle the marker, return, surface. It is the baseline the learned mission is measured against.</li>
-  <li><strong>The learned mission</strong> (<code>mission.py</code>) runs a gate policy and an orbit policy in turn, with a small hand-written runner deciding when to switch.</li>
+  <li><strong>The learned mission</strong> (<code>mission.py</code>) runs a gate policy and an orbit policy in turn, each until its done detector says it's finished.</li>
 </ul>
 <p>Both share the same physics, sensors, detection, perception and control code, so comparisons are fair.</p>
 <h3>Training versus flying</h3>
@@ -428,12 +428,12 @@
   <li><strong>Ending reward:</strong> a large bonus for success; the same penalty for any failure, timing out included, so hovering safely never beats trying.</li>
 </ul>
 <h3>Gate</h3>
-<p>The sub starts in front of the gate and must pass forward through the opening within 60 s.</p>
+<p>The sub starts in front of the gate and must pass forward through the opening, then carry on 1.5 m beyond it, within 60 s. Carrying on teaches it to keep going straight after the pass instead of turning back, so the orbit starts clear of the gate's frame.</p>
 <ul>
   <li><strong>Starts:</strong> 3–11 m out, up to ±3.5 m off center, ±30° off square, 0.1–1.9 m deep. The wide range lets one policy handle the forward pass and the return.</li>
   <li><strong>Search starts</strong> (<code>--search-starts</code>): a share of episodes turned a further 40–110° away, so the gate starts out of view and has to be found. Without them the policy had never practiced searching. Turned away, the gate policy got through only 47 of 60 times going forward and 31 of 60 on the return.</li>
   <li><strong>Progress:</strong> closer to the gate's center, the error from 1.5 m depth, and half the distance from the center line, so a square, centered approach pays best.</li>
-  <li><strong>Failure:</strong> crossing the gate line outside the opening.</li>
+  <li><strong>Failure:</strong> crossing the gate line outside the opening, or crossing back after passing.</li>
   <li><strong>Recorded starts:</strong> 30% of training episodes start where the mission actually hands over the return, moving at about 0.75 m/s.</li>
 </ul>
 <h3>Orbit</h3>
@@ -448,7 +448,7 @@
   <li><strong>Recorded starts:</strong> 40% begin where the mission actually hands over the orbit, again moving at about 0.75 m/s.</li>
 </ul>
 <h3>Return</h3>
-<p><code>GateReturnEnv</code> scores the gate policy on the way back: starts 8–11 m past the gate, up to 3.5 m off center, 1.1–1.9 m deep, success going back through the opening.</p>
+<p><code>GateReturnEnv</code> scores the gate policy on the way back: starts 8–11 m past the gate, up to 3.5 m off center, 1.1–1.9 m deep, success going back through the opening and 1.5 m beyond.</p>
 
 <h2 id="rewards">Reward weights</h2>
 <p>The reward is the only way to tell a policy what matters. Every weight below either encourages a behavior or closes a loophole a policy found. Most were set after watching a policy do something unwanted. They live in <code>RewardConfig</code> (<code>gate_env.py</code>), <code>OrbitRewardConfig</code> (<code>orbit_env.py</code>) and the shared base (<code>sub_env.py</code>).</p>
@@ -475,9 +475,11 @@
     <tr><td>Progress to the gate</td><td class="num">1.0 / m</td><td>Pays for getting closer to the gate's center</td><td>The main guide. A typical start is 3–11 m out, so it's worth 3–11 in all.</td></tr>
     <tr><td>Depth error</td><td class="num">1.0 / m</td><td>Counts distance from 1.5 m deep as distance from the gate</td><td>1.5 m is the middle of the usable opening (below the bar at 1.15 m, above the floor). Weighted like horizontal distance, so diving and closing in count equally.</td></tr>
     <tr><td>Off the center line</td><td class="num">0.5 / m</td><td>Counts sideways distance from the gate's center line</td><td>Rewards lining up square before arriving, which keeps the sub off the poles. Half weight so it guides the approach without making the policy creep sideways first. Adjustable with <code>--center-line-weight</code>.</td></tr>
-    <tr><td>Through the gate</td><td class="num">+20</td><td>Success: forward through the opening</td><td>Larger than all the progress in an episode combined, so finishing always beats any shaping trick. Raised together with the timeout penalty; gate success went from unstable to 97–100% on two seeds.</td></tr>
+    <tr><td>Through the gate</td><td class="num">+20</td><td>Paid at the pass, forward through the opening</td><td>Larger than all the progress in an episode combined, so getting through always beats any shaping trick. Raised together with the timeout penalty; gate success went from unstable to 97–100% on two seeds.</td></tr>
+    <tr><td>Carrying on</td><td class="num">1.0 / m</td><td>After the pass, pays for distance beyond the gate, up to 1.5 m</td><td>Keeps the progress measure pointing forward once the gate is behind.</td></tr>
+    <tr><td>Clear of the gate</td><td class="num">+5</td><td>Success: 1.5 m beyond the gate</td><td>Smaller than the pass bonus, because the hard part is done; enough that turning back (−5) is clearly worse than carrying on. Paying everything at the crossing had left the policy untrained just past it, and it turned back.</td></tr>
     <tr><td>Collision</td><td class="num">−5</td><td>Hitting a pole or the bar</td><td>A failure, like the others.</td></tr>
-    <tr><td>Missed gate</td><td class="num">−5</td><td>Crossing the gate line outside the opening, or the wrong way</td><td>Same as any failure, so sneaking around a pole is never a shortcut.</td></tr>
+    <tr><td>Missed gate</td><td class="num">−5</td><td>Crossing the gate line outside the opening, the wrong way, or back again after passing</td><td>Same as any failure, so sneaking around a pole is never a shortcut.</td></tr>
   </tbody>
 </table></div>
 <h3>Orbit</h3>
@@ -498,29 +500,33 @@
   </tbody>
 </table></div>
 
-<h2 id="runner">The mission runner</h2>
-<p>The learned mission is not one big network. A small hand-written state machine (<code>MissionRunner</code> in <code>mission.py</code>) runs one skill at a time and switches only on things the sub can actually measure: depth, heading, and what the camera sees. It never uses the simulator's true positions, so it would work the same way on the real sub.</p>
+<h2 id="runner">The mission runner and done detectors</h2>
+<p>The learned mission is not one big network, and it has no hand-written switching rules. The runner (<code>MissionRunner</code> in <code>mission.py</code>) runs one skill at a time and moves on when that skill's <em>done detector</em> says it's finished.</p>
 <div class="table-wrap"><table>
   <thead><tr><th>Phase</th><th>What flies</th><th>Moves on when</th></tr></thead>
   <tbody>
     <tr><td>DIVE</td><td>Controller only: hold heading, dive to 1.5 m</td><td>Measured depth past 1.3 m and steady</td></tr>
-    <tr><td>GATE</td><td>Gate policy</td><td>The gate was seen within 4 m, then out of sight for 3 s (we went through)</td></tr>
-    <tr><td>CLEAR</td><td>Controller only: straight ahead at 0.6 thrust, 1.5 m deep</td><td>3 s have passed, so the gate is well behind</td></tr>
-    <tr><td>ORBIT</td><td>Orbit policy</td><td>Turned at least 135°, heading within 45° of reversed, gate in view, marker gone (past the 35° edge of view or unseen for 2 s), and the marker on the side we are turning toward</td></tr>
-    <tr><td>RETURN</td><td>Gate policy again</td><td>Same gate-passed test as GATE</td></tr>
+    <tr><td>GATE</td><td>Gate policy</td><td>The gate's detector says done (trained on: through the gate and 1.5 m beyond)</td></tr>
+    <tr><td>ORBIT</td><td>Orbit policy</td><td>The orbit's detector says done (trained on: 270° around the marker and facing the gate)</td></tr>
+    <tr><td>RETURN</td><td>Gate policy again</td><td>The gate's detector says done</td></tr>
     <tr><td>DONE</td><td>Hold position</td><td>Mission complete</td></tr>
   </tbody>
 </table></div>
-<h3>Why each rule exists</h3>
+<p>Two safeguards remain. DIVE comes first because the gate policy was trained starting underwater; started at the surface, it chased the gate while still diving. And no phase may command a depth shallower than 1.2 m, so no policy can pull the sub to the surface by mistake (surfacing ends the run).</p>
+<h3>The done detector (<code>done_detector.py</code>)</h3>
+<p>Each skill's detector is a small network (128-128, tanh, one output) that reads the same observation as the skill's policy, so it only uses what the real sub can measure. Its output is the probability that the skill's job is finished. It's numpy only, so it runs on the Pi, and it carries its own copy of the policy's observation normalization.</p>
 <ul>
-  <li><strong>DIVE first.</strong> The gate policy was trained starting underwater. Starting it at the surface made it chase the gate while still diving.</li>
-  <li><strong>The 1.2 m depth floor</strong> applies to every phase, so no policy can pull the sub to the surface by mistake. Surfacing ends the run.</li>
-  <li><strong>CLEAR</strong> stops the orbit from starting while the sub is still between the gate poles. Without it, the orbit policy sometimes turned back into the poles.</li>
-  <li><strong>The 4 m pass range.</strong> "Lost sight of the gate" alone could mean the gate just drifted out of view. Requiring it to have been close first means we actually reached it.</li>
-  <li><strong>The marker-side check</strong> stops a false handoff when the sub has spun the wrong way and sees the gate early.</li>
+  <li><strong>Training data</strong> (<code>tools/train_done_detector.py</code>): the skill's own policy flies 800 training-style starts, with varied dynamics on every other one. Every 0.1 s step is labeled with the simulator's ground truth: is the job done now? Flights carry on 3 s past the finish so the detector also sees finished states.</li>
+  <li><strong>Training:</strong> ordinary supervised learning (binary cross-entropy, Adam), a few minutes on the CPU. On held-out flights it's right 98% of the time for the gate and 97% for the orbit.</li>
+  <li><strong>Firing:</strong> the gate's fires after 3 steps in a row above 0.5; the orbit's fires on the first step above 0.5.</li>
 </ul>
-<p>All the rules came from watching failed runs. Each one fixed a specific way the earlier runner switched too soon.</p>
-<div class="callout"><p><strong>Being replaced.</strong> Each of these rules moves the learned mission a step closer to the scripted one. The next version gives each policy a "done" output, learned in training, and the runner shrinks to a plain sequence: dive, then gate, orbit and gate, each until its policy says it's finished.</p></div>
+<p>The orbit's eager setting was chosen in the full mission, not offline. Cautious settings (a higher threshold, more steps in a row) looked better on held-out flights, but in the mission they sometimes missed the brief moment of finishing, and the sub kept circling: 115 of 120. Firing a few degrees before the true finish turned out harmless, because the sub keeps sweeping around the marker as it heads back to the gate: 119 of 120.</p>
+<h3>What was tried first</h3>
+<p>Two designs came before this one.</p>
+<ul>
+  <li><strong>Hand-written rules.</strong> The first runner switched on measured cues: the gate seen within 4 m and then lost for 3 s; a 3 s straight drive (CLEAR) to get clear of the gate; and for the orbit, five conditions at once (turned 135°, heading reversed, gate in view, marker gone to the side, marker on the turning side). Each rule fixed a failure seen in a run. It reached 118 of 120, but every rule moved the learned mission closer to the scripted one.</li>
+  <li><strong>A done output on each policy, learned from reward.</strong> This failed both ways it was tried. Starting at "not done", the policies rarely tried it, flew on past the finish into states they had never trained in, and got worse. Starting undecided, the small cost of saying done too early came almost every step, while the payoff for the right moment came rarely, so they learned never to say it. The gate fell to 0%. Supervised learning has no such problem: every moment comes with the right answer.</li>
+</ul>
 
 <h2 id="results">Results</h2>
 <p>The learned mission is now as reliable as the scripted one and about twice as fast. All scores below use the noisy detector and the thruster ramp. "Varied" means the dynamics were varied as in training.</p>
@@ -528,21 +534,21 @@
 <div class="table-wrap"><table>
   <thead><tr><th></th><th class="num">Nominal</th><th class="num">Varied</th><th class="num">Time (median)</th></tr></thead>
   <tbody>
-    <tr class="hl"><td>Learned skills + runner</td><td class="num">59/60 (98%)</td><td class="num">59/60 (98%)</td><td class="num">~56 s</td></tr>
+    <tr class="hl"><td>Learned skills + done detectors</td><td class="num">60/60 (100%)</td><td class="num">59/60 (98%)</td><td class="num">~55 s</td></tr>
     <tr><td>Scripted mission</td><td class="num">57/60 (95%)</td><td class="num">58/60 (97%)</td><td class="num">~110 s</td></tr>
   </tbody>
 </table></div>
-<p>The learned mission had no missed gates, surfacings or timeouts on these starts; each set had one collision. Before the gate learned to search, its failures were mostly missed gates on the return.</p>
+<p>The one failure was a false orbit-done just after an orbit began, which sent the sub back toward the gate. On the 10000+ starts it scored 59 of 60 (one missed gate). Successes take 55 s typically, 108 s at most.</p>
 <h3>Each skill, 100 test starts</h3>
 <div class="table-wrap"><table>
   <thead><tr><th>Skill</th><th class="num">Nominal</th><th class="num">Varied</th><th class="num">Time (median)</th></tr></thead>
   <tbody>
-    <tr><td>Gate, forward</td><td class="num">100%</td><td class="num">98%</td><td class="num">8.1 s</td></tr>
-    <tr><td>Gate, return</td><td class="num">94%</td><td class="num">95%</td><td class="num">11.9 s</td></tr>
+    <tr><td>Gate, forward (to 1.5 m beyond)</td><td class="num">99%</td><td class="num">n/a</td><td class="num">10.6 s</td></tr>
+    <tr><td>Gate, return (to 1.5 m beyond)</td><td class="num">96%</td><td class="num">n/a</td><td class="num">14.0 s</td></tr>
     <tr><td>Orbit</td><td class="num">99%</td><td class="num">100%</td><td class="num">30 s</td></tr>
   </tbody>
 </table></div>
-<p>The mission uses <code>gate_search_ft</code> and <code>orbit_confirm_ft</code>: fine-tuned from states recorded at real mission handoffs, then with search starts (gate) and confirmed marker sightings (orbit). The varied gate rows and the orbit row are for earlier versions; the current orbit scored 100% on the nominal test starts during training.</p>
+<p>The mission uses <code>gate_carry_ft2</code> and <code>orbit_confirm_ft</code>, with a done detector beside each. Both were fine-tuned from states recorded at real mission handoffs, then with search starts and carry-through (gate) and confirmed marker sightings (orbit). The orbit row is for an earlier version; the current orbit scored 100% on the nominal test starts during training.</p>
 <h3>How the scores were reached</h3>
 <div class="table-wrap"><table>
   <thead><tr><th>Step</th><th>Effect</th></tr></thead>
@@ -560,6 +566,7 @@
     <tr><td>Swing-out cost</td><td>orbit tight at 3.3 m (was 5.0 m)</td></tr>
     <tr><td>Both skills fine-tuned from recorded mission handoffs</td><td>learned mission ~89% → 97%, no more wandering orbits</td></tr>
     <tr><td>Marker sightings confirmed over 3 frames; gate search starts</td><td>learned mission 115 → 118 of 120; no more missed gates on the return</td></tr>
+    <tr><td>Done detectors replace the runner's rules; gate carries through</td><td>118 → 119 of 120, with no hand-written switching left</td></tr>
   </tbody>
 </table></div>
 
@@ -576,6 +583,8 @@
 <p><strong>Train with the hard rule, judge with the real one.</strong> From scratch, a policy facing only a cost inside the marker's margin never learned to go around. Trained with a hard stop at the margin, then scored where only a collision fails, it did best.</p>
 <p><strong>Practice the hard part, and the real starts.</strong> The orbit could not learn its last step until a third of episodes started near the end of the loop. The skills had trained from a standstill, while the mission hands them the sub moving at 0.75 m/s.</p>
 <p><strong>Handoffs need care.</strong> Most learned-mission failures came from the runner's switching cues, not the skills: switching before the sub was through the gate, missing a pass, or handing back with the marker in between. Each cue was fixed using what the sub can measure.</p>
+<p><strong>Learn "when" by supervision, not reward.</strong> Deciding when a skill is finished is a yes-or-no question with a known answer at every moment in the simulator. Learned from reward, the answer arrived too rarely and the policies learned never to say done. Learned from labels, it took minutes.</p>
+<p><strong>Judge a component where it's used.</strong> The orbit detector's offline scores favored cautious settings that failed in the mission, because offline every early firing counted as an error while in the mission most were harmless.</p>
 <p><strong>Fix it in learning, not in the runner.</strong> Every rule added to the runner makes the learned mission more like the scripted one. When a skill misbehaves, the first choice is to change what it trains on (search starts, recorded handoffs) or what it perceives (confirmed marker sightings), not to add a special case.</p>
 </div>
 
@@ -592,6 +601,7 @@
     <tr><td>Fine-tune from a checkpoint</td><td>add <code>--resume &lt;model.zip&gt; --learning-rate 1e-4</code></td></tr>
     <tr><td>Score a controller</td><td><code>.venv/bin/python tools/eval_gate.py &lt;controller&gt; --task mission --episodes 60 --seed 30000</code></td></tr>
     <tr><td>Record mission handoffs</td><td><code>.venv/bin/python tools/record_handoffs.py --missions 200</code></td></tr>
+    <tr><td>Train a skill's done detector</td><td><code>.venv/bin/python tools/train_done_detector.py --task gate --policy &lt;model.zip&gt;</code> (saved beside the policy)</td></tr>
     <tr><td>Training curves</td><td><code>.venv/bin/tensorboard --logdir runs</code>, then http://localhost:6006</td></tr>
   </tbody>
 </table></div>
@@ -603,11 +613,11 @@
   <tbody>
     <tr><td>Settings and types</td><td><code>config.py</code>, <code>core_types.py</code>, <code>world.py</code></td></tr>
     <tr><td>Simulation</td><td><code>sim_core.py</code>, <code>collision.py</code>, <code>sensor_model.py</code>, <code>camera_geometry.py</code>, <code>detector_model.py</code></td></tr>
-    <tr><td>Perception, observation, control (Pi)</td><td><code>perception.py</code>, <code>observation.py</code>, <code>controller.py</code></td></tr>
+    <tr><td>Perception, observation, control (Pi)</td><td><code>perception.py</code>, <code>observation.py</code>, <code>controller.py</code>, <code>done_detector.py</code></td></tr>
     <tr><td>Learning</td><td><code>sub_env.py</code>, <code>gate_env.py</code>, <code>orbit_env.py</code>, <code>envs.py</code>, <code>train.py</code>, <code>gate_controllers.py</code></td></tr>
     <tr><td>Mission</td><td><code>mission.py</code> (learned), <code>main.py</code>, <code>simulator.py</code>, <code>ai/</code> (scripted)</td></tr>
     <tr><td>Display</td><td><code>sim_view.py</code>, <code>watch.py</code></td></tr>
-    <tr><td>Tools</td><td><code>tools/eval_gate.py</code>, <code>tools/run_headless.py</code>, <code>tools/record_handoffs.py</code>, <code>tools/check_detector.py</code>, <code>tools/check_observation.py</code></td></tr>
+    <tr><td>Tools</td><td><code>tools/eval_gate.py</code>, <code>tools/train_done_detector.py</code>, <code>tools/run_headless.py</code>, <code>tools/record_handoffs.py</code>, <code>tools/check_detector.py</code>, <code>tools/check_observation.py</code></td></tr>
   </tbody>
 </table></div>
 <h3>Conventions</h3>
@@ -619,14 +629,15 @@
     <tr><td>Bearing</td><td>degrees from the camera's axis, positive left</td></tr>
     <tr><td>Pitch</td><td>positive nose up</td></tr>
     <tr><td>Sway</td><td>positive moves the sub left</td></tr>
-    <tr><td>Seeds</td><td>training 0+, handoff recording 40000+, test starts 10000+, 20000+ and 30000+, search tests 50000+</td></tr>
+    <tr><td>Seeds</td><td>training 0+, handoff recording 40000+, test starts 10000+, 20000+ and 30000+, search tests 50000+, detector data 60000+</td></tr>
   </tbody>
 </table></div>
 <h3>Limitations and next steps</h3>
 <ul>
   <li>Not modeled: one object hiding another from the camera; pitch in the collision box; currents. Drag is a guess, varied ±20% in training.</li>
   <li>The scripted baseline still uses ground truth in a few SIM ONLY helpers, which flatters it slightly.</li>
-  <li>The learned mission's remaining failures are rare collisions. Searching for an out-of-view gate is better but not yet reliable (44 of 60 forward, 41 of 60 on the return).</li>
+  <li>The learned mission's remaining failures are rare: a false orbit-done, a missed gate. Searching for an out-of-view gate is better but not yet reliable (44 of 60 forward, 41 of 60 on the return).</li>
+  <li>The orbit's recorded training starts came from the old rule-based runner; the detector hands over at slightly different moments, so re-recording them is a cheap next step.</li>
   <li>Later: export the actors and their normalization to numpy for the Pi, and check its outputs match PyTorch's.</li>
   <li>The old competition course objects are kept in <code>world.py</code> for a possible full-course task.</li>
 </ul>

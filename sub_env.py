@@ -19,6 +19,10 @@ counts as progress:
   _potential()             progress measure (ground truth); reward is its change each step
   _terminal_reward(name)   bonus or penalty for how the episode ended
   _step_cost()             optional extra cost each 10 Hz step (default 0)
+  _complete()              success check after each 10 Hz step: True ends the episode as a success
+                           (default: the skill decides in _step_outcome instead)
+  done_label()             ground truth for the skill's done detector (done_detector.py): is the job
+                           done now? Defaults to _complete()
   _episode_info()          optional extra numbers for info at the end (named in EXTRA_INFO)
 
 With randomize=True (training), each episode scales the controller gains,
@@ -74,6 +78,7 @@ class SubTaskEnv(gym.Env):
         self.dynamics = {}   # The factors drawn for this episode (empty when not randomizing)
         self.controller = SetpointController()
         self.on_physics_step = None   # Optional callback(env, thruster_commands) after each physics step, for viewers
+        self.end_on_complete = True   # False keeps flying past success (done-detector data collection)
         self.core = SubSim(detector_mode=detector_mode, log=None)
         self.builder = ObservationBuilder(self.core.camera, action_dim=self.ACTION_DIM,
                                           include_marker=self.INCLUDE_MARKER)
@@ -104,6 +109,12 @@ class SubTaskEnv(gym.Env):
 
     def _episode_info(self) -> dict:
         return {}
+
+    def _complete(self) -> bool:
+        return False
+
+    def done_label(self) -> bool:
+        return self._complete()
 
     def scripted_mission(self) -> List:
         raise NotImplementedError
@@ -211,7 +222,7 @@ class SubTaskEnv(gym.Env):
 
         obs = self._observe()
         if not outcome:
-            outcome = self._step_outcome()
+            outcome = self._step_outcome() or ("success" if self.end_on_complete and self._complete() else None)
         self.energy += step_energy
         new_potential = self._potential()
         reward = self.progress_weight * (new_potential - self.potential) - self.time_penalty

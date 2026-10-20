@@ -3,8 +3,11 @@
 Gymnasium environment for the gate skill: start somewhere in front of the gate
 and go through it. Actions, observation and the episode loop are in sub_env.py.
 
-An episode ends when the sub goes forward through the gate (success, +20), hits
-something, crosses the gate line anywhere else, or runs out of time (-5 each).
+Going forward through the gate opening pays +20. The episode succeeds (+5)
+once the sub carries on to CLEAR_M beyond the gate, clear of its frame, so the
+policy learns to keep going straight instead of turning back. Failures (-5
+each): hitting something, crossing the gate line anywhere else or crossing
+back, or running out of time.
 """
 import random
 from dataclasses import dataclass
@@ -13,6 +16,8 @@ from typing import List, Optional
 import numpy as np
 
 from sub_env import DEPTH_MAX, DEPTH_MIN, HEADING_CHANGE_DEG, SubTaskEnv  # noqa: F401  (re-exported)
+
+CLEAR_M = 1.5       # Beyond the gate line, past the frame, before the skill counts as done
 
 
 @dataclass
@@ -33,7 +38,8 @@ class RewardConfig:
     depth_weight: float = 1.0      # How much depth error counts in that distance
     center_line_weight: float = 0.5  # How much distance from the gate's center line counts
     target_depth_m: float = 1.5    # Middle of the usable gate opening
-    gate_bonus: float = 20.0
+    gate_bonus: float = 20.0       # For the pass, paid through the progress measure
+    clear_bonus: float = 5.0       # For carrying on to CLEAR_M beyond the gate
     collision_penalty: float = 5.0
     missed_gate_penalty: float = 5.0
     timeout_penalty: float = 5.0   # So hovering near the gate isn't a safe alternative to committing
@@ -73,19 +79,41 @@ class GateEnv(SubTaskEnv):
             # Turned away: the policy has to find the gate before it can line up
             s.heading = (s.heading + rng.choice((-1, 1)) * rng.uniform(*sc.search_turn_deg)) % 360
 
+    def _on_reset(self):
+        self.passed, self._at_pass = False, None
+
+    def _past_gate_m(self) -> float:
+        """How far beyond the gate line the sub is, in the direction it should pass. Ground truth."""
+        return (self.core.state.x - self.core.gate.x) * self.expect_direction
+
     def _physics_outcome(self) -> Optional[str]:
         for c in self.new_crossings():
-            return "success" if c.inside_opening and c.direction == self.expect_direction else "missed_gate"
+            if not self.passed and c.inside_opening and c.direction == self.expect_direction:
+                self.passed = True
+            else:
+                return "missed_gate"
         return None
+
+    def _complete(self) -> bool:
+        return self.passed and self._past_gate_m() >= CLEAR_M
 
     def _terminal_reward(self, outcome: str) -> float:
         rc = self.reward_cfg
-        return {"success": rc.gate_bonus, "collision": -rc.collision_penalty,
+        return {"success": rc.clear_bonus, "collision": -rc.collision_penalty,
                 "missed_gate": -rc.missed_gate_penalty}[outcome]
 
     def _potential(self) -> float:
-        """Minus the distance to the gate center (horizontal, plus weighted depth error and distance
-        from the gate's center line, so approaching square-on pays). Ground truth."""
+        """Before the pass: minus the distance to the gate center (horizontal, plus weighted depth error
+        and distance from the gate's center line, so approaching square-on pays). After: its value at the
+        pass, plus the gate bonus, plus progress out to CLEAR_M beyond. Ground truth."""
+        rc = self.reward_cfg
+        if self.passed:
+            if self._at_pass is None:
+                self._at_pass = self._approach_potential()
+            return self._at_pass + rc.gate_bonus + min(max(self._past_gate_m(), 0.0), CLEAR_M)
+        return self._approach_potential()
+
+    def _approach_potential(self) -> float:
         s, g, rc = self.core.state, self.core.gate, self.reward_cfg
         horizontal = float(np.hypot(g.x - s.x, g.center_y - s.y))
         return -(horizontal + rc.depth_weight * abs(s.z - rc.target_depth_m)

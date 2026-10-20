@@ -14,6 +14,8 @@ Success needs both:
     it really went around (not out and back on one side)
   - handoff, measurable on the real sub: the gate is in view and the sub's
     heading has turned 180° (± HANDOFF_HEADING_DEG) since the start of the orbit
+The done detector's label (done_label) is ground truth: swept SWEEP_DEG and
+facing the gate within DONE_FACING_DEG.
 Failures: a collision, crossing back through the gate plane early, or a timeout.
 
 The safety margin (MIN_MARKER_DISTANCE_M from the marker's center) has two rules:
@@ -46,6 +48,7 @@ MARKER_GRACE_S = 0.5           # A dropout this short doesn't count as losing si
 HALF_FOV_DEG = 35.0
 MIN_MARKER_DISTANCE_M = 1.5    # Safety margin, center to center; contact is at about 0.38 m
 HANDOFF_HEADING_DEG = 45.0
+DONE_FACING_DEG = 30.0         # Done label: facing the gate's center within this
 
 
 def _wrap(deg: float) -> float:
@@ -204,10 +207,15 @@ class OrbitEnv(SubTaskEnv):
             return False
         return abs(_wrap(self.readings.heading - b.start_heading - 180.0)) <= HANDOFF_HEADING_DEG
 
-    def _step_outcome(self) -> Optional[str]:
-        if abs(self.swept) >= SWEEP_DEG and self.handoff_ready():
-            return "success"
-        return None
+    def _facing_gate_deg(self) -> float:
+        s, g = self.core.state, self.core.gate
+        return abs(_wrap(math.degrees(math.atan2(g.center_y - s.y, g.x - s.x)) - s.heading))
+
+    def _complete(self) -> bool:
+        return abs(self.swept) >= SWEEP_DEG and self.handoff_ready()
+
+    def done_label(self) -> bool:
+        return abs(self.swept) >= SWEEP_DEG and self._facing_gate_deg() <= DONE_FACING_DEG
 
     def _terminal_reward(self, outcome: str) -> float:
         rc = self.reward_cfg
