@@ -45,14 +45,21 @@ EVAL_SEED = 10_000
 def env_kwargs(task: str, args, scoring: bool = False) -> dict:
     """Environment settings for training, or for scoring (always the real-world margin rule)."""
     randomize = {"randomize": True} if args.randomize and not scoring else {}
+    recorded = {}
+    if args.mission_starts and not scoring:
+        with open(args.mission_starts) as f:
+            handoffs = json.load(f)
+        recorded = ({"mission_starts": handoffs["ORBIT"]} if task == "orbit"
+                    else {"mission_return_starts": handoffs["RETURN"]} if task == "gate" else {})
     if task in ("gate", "gate_return"):
-        kwargs = {"reward": RewardConfig(center_line_weight=args.center_line_weight), **randomize}
+        kwargs = {"reward": RewardConfig(center_line_weight=args.center_line_weight), **randomize, **recorded}
         if task == "gate" and args.wide_starts and not scoring:
             # Covers both the forward pass and the return from the orbit's handoff
             kwargs["start"] = StartConfig(distance_m=(3.0, 11.0), lateral_m=(-3.5, 3.5), depth_m=(0.1, 1.9))
         return kwargs
     if task == "orbit":
-        return {"margin_rule": "soft" if scoring else args.margin_rule, "practice_starts": not scoring, **randomize}
+        return {"margin_rule": "soft" if scoring else args.margin_rule, "practice_starts": not scoring,
+                **randomize, **recorded}
     return randomize
 
 
@@ -206,6 +213,8 @@ def main():
     parser.add_argument("--randomize", action="store_true",
                         help="Training only: vary PID gains, inertia, drag and thrust each episode "
                              "(config.RandomizationConfig). Scored tests use nominal values")
+    parser.add_argument("--mission-starts", help="Training only: JSON of recorded mission handoffs "
+                        "(tools/record_handoffs.py); a share of episodes start from them")
     parser.add_argument("--wide-starts", action="store_true",
                         help="Gate skill, training only: starts 3-11 m out, up to 3.5 m off center, 0.1-1.9 m deep, "
                              "covering the return from the orbit as well as the forward pass")

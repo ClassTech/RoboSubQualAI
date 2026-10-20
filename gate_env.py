@@ -44,8 +44,12 @@ class GateEnv(SubTaskEnv):
 
     def __init__(self, detector_mode: str = "perfect", control_period: float = 0.1,
                  max_seconds: float = 60.0, start: Optional[StartConfig] = None,
-                 reward: Optional[RewardConfig] = None, randomize: bool = False):
+                 reward: Optional[RewardConfig] = None, randomize: bool = False,
+                 mission_return_starts: Optional[list] = None, mission_share: float = 0.3):
         self.start_cfg = start or StartConfig()
+        # Recorded handoffs into the return leg (training); those episodes succeed going back through
+        self.mission_return_starts, self.mission_share = mission_return_starts or [], mission_share
+        self.expect_direction = 1
         self.reward_cfg = rc = reward or RewardConfig()
         super().__init__(detector_mode, control_period, max_seconds, energy_penalty=rc.energy_penalty,
                          time_penalty=rc.time_penalty, progress_weight=rc.progress,
@@ -53,6 +57,11 @@ class GateEnv(SubTaskEnv):
 
     def _place_sub(self, rng: random.Random):
         s, g, sc = self.core.state, self.core.gate, self.start_cfg
+        self.expect_direction = 1
+        if self.mission_return_starts and rng.random() < self.mission_share:
+            self.apply_recorded_start(rng.choice(self.mission_return_starts))
+            self.expect_direction = -1
+            return
         s.x = g.x - rng.uniform(*sc.distance_m)
         s.y = g.center_y + rng.uniform(*sc.lateral_m)
         s.heading = rng.uniform(*sc.heading_deg) % 360
@@ -60,7 +69,7 @@ class GateEnv(SubTaskEnv):
 
     def _physics_outcome(self) -> Optional[str]:
         for c in self.new_crossings():
-            return "success" if c.inside_opening and c.direction > 0 else "missed_gate"
+            return "success" if c.inside_opening and c.direction == self.expect_direction else "missed_gate"
         return None
 
     def _terminal_reward(self, outcome: str) -> float:
@@ -101,12 +110,9 @@ class GateReturnEnv(GateEnv):
 
     def _place_sub(self, rng: random.Random):
         s, g, sc = self.core.state, self.core.gate, self.start_cfg
+        self.expect_direction = -1
         s.x = g.x + rng.uniform(*sc.distance_m)
         s.y = g.center_y + rng.uniform(*sc.lateral_m)
         s.heading = (180.0 + rng.uniform(*sc.heading_deg)) % 360
         s.z = rng.uniform(*sc.depth_m)
 
-    def _physics_outcome(self) -> Optional[str]:
-        for c in self.new_crossings():
-            return "success" if c.inside_opening and c.direction < 0 else "missed_gate"
-        return None

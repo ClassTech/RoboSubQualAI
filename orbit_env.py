@@ -100,10 +100,12 @@ class OrbitEnv(SubTaskEnv):
     def __init__(self, detector_mode: str = "perfect", control_period: float = 0.1,
                  max_seconds: float = 90.0, start: Optional[OrbitStartConfig] = None,
                  reward: Optional[OrbitRewardConfig] = None, margin_rule: str = "soft",
-                 practice_starts: bool = False, randomize: bool = False):
+                 practice_starts: bool = False, randomize: bool = False,
+                 mission_starts: Optional[list] = None, mission_share: float = 0.4):
         assert margin_rule in ("soft", "hard"), margin_rule
         self.margin_rule = margin_rule
         self.practice_starts = practice_starts
+        self.mission_starts, self.mission_share = mission_starts or [], mission_share   # Recorded handoffs (training)
         self.start_cfg = start or OrbitStartConfig()
         self.reward_cfg = rc = reward or OrbitRewardConfig()
         super().__init__(detector_mode, control_period, max_seconds, energy_penalty=rc.energy_penalty,
@@ -114,6 +116,10 @@ class OrbitEnv(SubTaskEnv):
     def _place_sub(self, rng: random.Random):
         s, g, m, sc = self.core.state, self.core.gate, self.core.marker, self.start_cfg
         self._preset_swept = 0.0
+        if self.mission_starts and rng.random() < self.mission_share:
+            # Where the mission runner actually hands over, still moving after the straight drive
+            self.apply_recorded_start(rng.choice(self.mission_starts))
+            return
         if self.practice_starts and rng.random() < sc.practice_share:
             # Partway around the marker, facing it. The orbit begins on the gate side (angle 180 deg).
             swept = rng.choice((-1, 1)) * rng.uniform(*sc.practice_swept_deg)

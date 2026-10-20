@@ -129,6 +129,15 @@ class SubTaskEnv(gym.Env):
         self.last_action = np.zeros(self.ACTION_DIM, dtype=np.float32)
         return self._observe(), {}
 
+    def apply_recorded_start(self, rec: dict):
+        """Put the sub in a recorded state (tools/record_handoffs.py): pose, velocities, thrusters."""
+        s, t = self.core.state, self.core.thrust
+        for k, v in rec.items():
+            if k.startswith("thrust_"):
+                setattr(t, k[len("thrust_"):], v)
+            else:
+                setattr(s, k, v)
+
     def _vary_dynamics(self, rng: random.Random):
         nominal = ControllerGains()
         if not self.randomize:
