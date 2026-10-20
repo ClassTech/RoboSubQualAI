@@ -75,7 +75,12 @@ Train an RL policy in this simulator to fly the RoboSub gate task, then run it o
 - [ ] Turn on realism one layer at a time, retraining after each: detector noise, then a thruster model (deadband, forward/reverse asymmetry, battery sag, spin-up lag), then randomized PID gains.
   - Detector noise: done (all current policies train with the noisy detector).
   - Thrusters (from the user): the same thrust forward and reverse; the sub's software limits each thruster to 0.5 s from zero to full and back. The ramp is modeled in `SubSim` (`thrusterRampSec`). No dead zone (per the user), and no battery sag: missions are short compared with battery life. The thruster model is complete.
-  - The ramp made the pitch loop oscillate (gain 1.0 per degree). Lowered to 0.2, which brought the scripted mission back to 95%. Policies trained with instant thrust dropped (gate 82% / 85%, orbit 35%, learned mission 28%). Fine-tuning them with the ramp: `gate_ramp_ft`, `orbit_ramp_ft`, plus a fresh `orbit_ramp_s1`.
+  - The ramp made the pitch loop oscillate (gain 1.0 per degree). Lowered to 0.2, which brought the scripted mission back to 95%. Policies trained with instant thrust dropped (gate 82% / 85%, orbit 35%, learned mission 28%).
+  - Fine-tuned with the ramp (`gate_ramp_ft`: 95% / 91%; `orbit_ramp_ft`: ~90%, failing only by surfacing). A fresh orbit run didn't learn and was stopped.
+- [x] Randomized dynamics (`--randomize`, `config.RandomizationConfig`): each PID gain ×0.7–1.3, yaw and pitch inertia ×0.7–1.3, each drag ×0.8–1.2, thrust ×0.9–1.1, per episode. Scored tests stay nominal; `eval_gate.py --randomize` scores on varied dynamics.
+  - A 1.2 m depth floor on the gate and orbit commands, in training, scoring and the runner (the opening is below 1.15 m). It stopped the surfacing.
+  - With variation, the orbit still surfaced in 18% of runs. The policy flipped its depth command 1.2 ↔ 1.9 m from step to step, which with the ramp set the pitch swinging. The shared controller now rate-limits the depth target to 0.5 m/s. No retraining needed.
+  - **Chosen: `gate_rand_ft2` (final): forward 100% / 99%, return 96% / 96%; `orbit_rand_ft` (final): 97% / 99% (nominal / varied, 100 noisy starts).**
 - [ ] Measure the policy's success rate against the scripted baseline in the same randomized environment.
   - Perfect and noisy detectors done (above). Repeat after each realism layer.
 
@@ -120,7 +125,9 @@ The display stays optional: training runs without a window, and the same physics
 - [x] Chain gate → orbit → gate (`mission.py`): `MissionEnv` judges the whole run on ground truth; `MissionRunner` is a hand-written state machine that switches on measurable triggers: DIVE → GATE → CLEAR (3 s straight) → ORBIT → RETURN → DONE. Orbit depth is clamped to ≥1.2 m.
   - Fixes found by running it: the gate leaves the view ~1.5–2 m out and the sub slows to ~0.5 m/s, so the pass trigger waits 3 s and a 3 s straight drive follows. The orbit-to-return handoff needs the marker to have left the view to the side, which separates the real finish from facing the gate with the marker in between. Diving first, plus the depth floor, fixed most failures, which were depth-related.
   - **60 fresh noisy starts: learned mission 54/60 (90%), median 60 s; scripted mission 58/60 (97%), median 113 s.** The learned run spends ~5 s per run inside the marker margin (closest 0.45 m).
-- [ ] Possible improvements: train each skill from the starts it actually gets in the mission (record the handoffs); fine-tune the gate return (95%); have the orbit keep a little more room from the marker.
+- [x] Mission with the realism layers (ramp, variation): the runner's pass check now arms within 4 m. At 2.5 m it missed passes where the gate dropped out of view a little farther out, and the gate policy then turned back. Requiring the marker 45–60° off the nose before the return handoff made things worse, so the original rule stays.
+  - **240 noisy starts (seeds 20000+ and 30000+, nominal and varied): learned 221 (92%) at ~70 s, scripted 228 (95%) at ~110 s.** On the fresh 30000+ starts: learned 90% / 88%, scripted 95% / 97%.
+- [ ] Possible improvements: train each skill from the starts it actually gets in the mission (record the handoffs); look at the remaining spread-out failures (collisions, missed gates, a skipped orbit).
 
 ## Phase 6: Export to the Pi 5 (deferred)
 - [ ] Export the weights plus the `VecNormalize` statistics, and write a plain-numpy forward pass.
