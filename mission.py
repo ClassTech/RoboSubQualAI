@@ -12,6 +12,9 @@ around the marker (skipped_orbit), surfacing, or running out of time.
 
 MissionRunner is a small hand-written state machine that runs the learned
 skills in turn, switching only on things the real sub can measure:
+  DIVE   (scripted)      -> GATE   once the measured depth is past DIVE_DONE_M and
+                                    steady (the run starts at the surface 3 m from
+                                    the gate, too close for the gate policy to dive)
   GATE   (gate policy)   -> CLEAR  once the gate was last seen close (< PASS_RANGE_M),
                                     then not seen for PASS_UNSEEN_S
   CLEAR  (scripted)      -> ORBIT  after CLEAR_S of driving straight at 1.5 m, so the
@@ -28,6 +31,10 @@ skills in turn, switching only on things the real sub can measure:
   RETURN (gate policy)   -> DONE   same pass check as GATE
 Each skill gets its own observation builder (the two policies see different
 layouts), reset when the skill takes over, as in training.
+
+Safety limit: during the orbit, the commanded depth is never shallower than
+ORBIT_MIN_DEPTH_M (the orbit tends to rise as it starts, and drifted back over
+the gate's top bar).
 """
 import math
 import random
@@ -39,6 +46,10 @@ from observation import ObservationBuilder
 from sub_env import SubTaskEnv
 
 GATE_POLICY = "runs/gate_wide_s1/best_model.zip"
+DIVE_DEPTH_M = 1.5
+DIVE_DONE_M = 1.3           # Dive is done below this...
+DIVE_STEADY_MPS = 0.1       # ...once the depth rate has settled under this
+ORBIT_MIN_DEPTH_M = 1.2
 ORBIT_POLICY = "runs/orbit_practice_s1/best_model.zip"
 
 PASS_RANGE_M = 2.5          # The gate counts as passed if last seen closer than this...
@@ -134,7 +145,8 @@ class MissionRunner:
         cam = env.core.camera
         self.gate_builder = ObservationBuilder(cam, action_dim=3)
         self.orbit_builder = ObservationBuilder(cam, action_dim=4, include_marker=True)
-        self.phase = "GATE"
+        self.phase = "DIVE"
+        self.dive_heading = env.readings.heading
         self.gate_was_close = False
         self.turned, self._prev_heading = 0.0, None
         self.skill_action = np.zeros(3, dtype=np.float32)
@@ -171,8 +183,15 @@ class MissionRunner:
             self.gate_builder.reset()
             self.gate_was_close = False
 
+    @staticmethod
+    def _depth_action(depth_m: float) -> float:
+        return (depth_m - 0.3) / (1.9 - 0.3) * 2 - 1
+
     def step(self, env, obs):
         heading = env.readings.heading
+        r = env.readings
+        if self.phase == "DIVE" and r.depth > DIVE_DONE_M and abs(r.depth_rate) < DIVE_STEADY_MPS:
+            self._switch(env, "GATE")
         if self.phase in ("GATE", "RETURN"):
             o = self._update(env, self.gate_builder)
             if self._passed_gate():
@@ -195,17 +214,20 @@ class MissionRunner:
         if self.phase == "ORBIT":
             a = self.orbit_model.predict(self.orbit_norm.normalize_obs(o), deterministic=True)[0]
             self.skill_action = np.asarray(a, dtype=np.float32)
-            action = self.skill_action
+            action = self.skill_action.copy()
+            action[1] = max(action[1], self._depth_action(ORBIT_MIN_DEPTH_M))   # Safety limit on depth
         elif self.phase in ("GATE", "RETURN"):
             a = self.gate_model.predict(self.gate_norm.normalize_obs(o), deterministic=True)[0]
             self.skill_action = np.asarray(a, dtype=np.float32)
             action = np.append(self.skill_action, 0.0)
         else:
+            # DIVE: hold the start heading, no thrust forward, dive to 1.5 m.
             # CLEAR: straight ahead at 1.5 m, holding the heading from the pass. DONE: hold position.
-            depth_action = (CLEAR_DEPTH_M - 0.3) / (1.9 - 0.3) * 2 - 1
+            depth_action = self._depth_action(DIVE_DEPTH_M if self.phase == "DIVE" else CLEAR_DEPTH_M)
             turn = 0.0
-            if self.phase == "CLEAR":
-                turn = float(np.clip(_wrap(self.clear_heading - env.readings.heading) / 45.0, -1, 1))
+            hold = {"CLEAR": getattr(self, "clear_heading", None), "DIVE": self.dive_heading}.get(self.phase)
+            if hold is not None:
+                turn = float(np.clip(_wrap(hold - env.readings.heading) / 45.0, -1, 1))
             surge = CLEAR_SURGE if self.phase == "CLEAR" else 0.0
             action = np.array([turn, depth_action, surge, 0.0], dtype=np.float32)
         self.last_action = action
