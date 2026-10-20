@@ -59,6 +59,7 @@ class SubTaskEnv(gym.Env):
     EXTRA_INFO = ()          # Names of extra per-episode numbers from _episode_info()
     INCLUDE_MARKER = False   # Whether the observation tracks the green marker pole
     ACTION_DIM = 3           # 4 adds sway
+    MIN_TARGET_DEPTH_M = None   # If set, the policy can't command a shallower target depth (a safety limit)
 
     def __init__(self, detector_mode: str = "perfect", control_period: float = 0.1,
                  max_seconds: float = 60.0, energy_penalty: float = 0.05, time_penalty: float = 0.01,
@@ -152,6 +153,8 @@ class SubTaskEnv(gym.Env):
         a = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
         self.target_heading = (self.readings.heading + HEADING_CHANGE_DEG * float(a[0])) % 360
         self.target_depth = DEPTH_MIN + (float(a[1]) + 1) / 2 * (DEPTH_MAX - DEPTH_MIN)
+        if self.MIN_TARGET_DEPTH_M is not None:
+            self.target_depth = max(self.target_depth, self.MIN_TARGET_DEPTH_M)
         surge = float(a[2])
         sway = float(a[3]) if self.ACTION_DIM > 3 else 0.0
 

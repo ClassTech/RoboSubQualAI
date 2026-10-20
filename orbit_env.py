@@ -93,6 +93,7 @@ class OrbitEnv(SubTaskEnv):
     EXTRA_INFO = ("marker_view", "off_center_deg", "inside_margin_s", "closest_m")
     INCLUDE_MARKER = True
     ACTION_DIM = 4
+    MIN_TARGET_DEPTH_M = 1.2   # Same safety limit the mission runner applies: the orbit never needs to be shallower
 
     def __init__(self, detector_mode: str = "perfect", control_period: float = 0.1,
                  max_seconds: float = 90.0, start: Optional[OrbitStartConfig] = None,
