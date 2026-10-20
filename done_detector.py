@@ -13,10 +13,18 @@ Learning this from the policy's reward instead failed: the cost of saying done
 too early came every step and the payoff for the right moment rarely, so the
 policies learned never to say it.
 
+Besides the observation it gets one more measured number: the total heading
+turned since the skill began (magnetometer, unwrapped). The observation only
+covers the last 0.4 s, and without this the orbit's detector mistook facing
+the gate a quarter of the way around for the finish three quarters of the way
+around: mirror images, told apart only by which way the sub has been turning.
+
 numpy only, so it runs on the Pi unchanged. A detector file (.npz) carries its
 own copy of the observation normalization the policy was trained with.
 """
 import numpy as np
+
+TURNED_SCALE_DEG = 360.0
 
 
 class DoneDetector:
@@ -29,21 +37,32 @@ class DoneDetector:
         self.threshold = float(d["threshold"]) if threshold is None else threshold
         self.confirm = int(d["confirm"]) if confirm is None else confirm
         self.streak = 0
+        self.turned, self._last_heading = 0.0, None
 
     def reset(self):
         self.streak = 0
+        self.turned, self._last_heading = 0.0, None
 
-    def probability(self, obs: np.ndarray) -> float:
-        """Chance the skill is finished, from one raw (unnormalized) observation."""
+    def track_heading(self, heading: float):
+        """Feed the measured heading each step (deg) to keep the total turned since reset()."""
+        if self._last_heading is not None:
+            self.turned += (heading - self._last_heading + 180.0) % 360.0 - 180.0
+        self._last_heading = heading
+
+    def probability(self, obs: np.ndarray, turned: float = None) -> float:
+        """Chance the skill is finished, from one raw (unnormalized) observation and the heading turned."""
+        turned = self.turned if turned is None else turned
         x = np.clip((np.asarray(obs, dtype=np.float32) - self.mean) / self.std, -self.clip, self.clip)
+        x = np.append(x, np.float32(turned / TURNED_SCALE_DEG))
         for i, (w, b) in enumerate(self.layers):
             x = x @ w + b
             if i < len(self.layers) - 1:
                 x = np.tanh(x)
         return float(1.0 / (1.0 + np.exp(-x[0])))
 
-    def update(self, obs: np.ndarray) -> bool:
-        """Feed this step's observation; True once the skill is judged finished."""
+    def update(self, obs: np.ndarray, heading: float) -> bool:
+        """Feed this step's observation and measured heading; True once the skill is judged finished."""
+        self.track_heading(heading)
         self.streak = self.streak + 1 if self.probability(obs) > self.threshold else 0
         return self.streak >= self.confirm
 

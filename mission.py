@@ -170,7 +170,7 @@ class MissionRunner:
                                           (self.gate_builder, self.gate_model, self.gate_norm, self.gate_done))
         obs = self._update(env, builder)
         a = model.predict(norm.normalize_obs(obs), deterministic=True)[0]
-        return np.asarray(a, dtype=np.float32), detector.update(obs)
+        return np.asarray(a, dtype=np.float32), detector.update(obs, env.readings.heading)
 
     def step(self, env, obs):
         r = env.readings

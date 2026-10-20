@@ -61,10 +61,17 @@ def collect(job):
     for seed in seeds:
         env = make_env(task, handoffs, randomize=seed % 2 == 1)
         obs, _ = env.reset(seed=seed)
-        rows, labels, onset = [], [], None
+        rows, turned, labels, onset = [], [], [], None
+        # Practice starts begin partway around the marker, facing it, so the heading has
+        # already turned about as far as the sweep
+        total, last = float(getattr(env, "_preset_swept", 0.0)), None
         with redirect_stdout(io.StringIO()):
             while True:
+                h = env.readings.heading   # Measured, as on the sub
+                total += 0.0 if last is None else (h - last + 180.0) % 360.0 - 180.0
+                last = h
                 rows.append(obs)
+                turned.append(total)
                 label = bool(env.done_label())
                 labels.append(label)
                 if label and onset is None:
@@ -75,7 +82,7 @@ def collect(job):
                 obs, _, term, trunc, _ = env.step(action)
                 if term or trunc:
                     break
-        episodes.append((np.array(rows, dtype=np.float32), np.array(labels), onset))
+        episodes.append((np.array(rows, dtype=np.float32), np.array(turned, dtype=np.float32), np.array(labels), onset))
     return episodes
 
 
@@ -146,17 +153,19 @@ def main():
     jobs = [(args.task, args.policy, handoffs, seeds[i::args.workers]) for i in range(args.workers)]
     with Pool(args.workers) as pool:
         episodes = [e for part in pool.map(collect, jobs) for e in part]
-    finished = sum(onset is not None for _, _, onset in episodes)
+    finished = sum(onset is not None for *_, onset in episodes)
     print(f"{len(episodes)} episodes, {finished} reached the finish; "
-          f"{sum(len(r) for r, _, _ in episodes):,} labeled moments", flush=True)
+          f"{sum(len(e[0]) for e in episodes):,} labeled moments", flush=True)
 
     _, norm = load_policy(args.policy)
     mean, var, clip = norm.obs_rms.mean.astype(np.float32), norm.obs_rms.var.astype(np.float32), norm.clip_obs
-    normalize = lambda x: np.clip((x - mean) / np.sqrt(var + 1e-8), -clip, clip).astype(np.float32)
+    from done_detector import TURNED_SCALE_DEG
+    features = lambda rows, turned: np.column_stack([np.clip((rows - mean) / np.sqrt(var + 1e-8), -clip, clip),
+                                                     turned / TURNED_SCALE_DEG]).astype(np.float32)
     held_out = episodes[::5]
     train_eps = [e for i, e in enumerate(episodes) if i % 5]
-    x = normalize(np.concatenate([r for r, _, _ in train_eps]))
-    y = np.concatenate([l for _, l, _ in train_eps]).astype(np.float32)
+    x = np.concatenate([features(r, t) for r, t, _, _ in train_eps])
+    y = np.concatenate([l for _, _, l, _ in train_eps]).astype(np.float32)
     layers = train(x, y, args.epochs)
 
     out = detector_path(args.policy)
@@ -168,9 +177,9 @@ def main():
 
     # When it would first fire on episodes it never saw, for each setting
     det = DoneDetector(out)
-    probs = [np.array([det.probability(o) for o in rows]) for rows, _, _ in held_out]
-    onsets = [None if onset is None else float(np.argmax(labels)) * 0.1 for _, labels, onset in held_out]
-    acc = np.mean([(p > 0.5) == l for ps, (_, labels, _) in zip(probs, held_out) for p, l in zip(ps, labels)])
+    probs = [np.array([det.probability(o, t) for o, t in zip(rows, turned)]) for rows, turned, _, _ in held_out]
+    onsets = [None if onset is None else float(np.argmax(labels)) * 0.1 for _, _, labels, onset in held_out]
+    acc = np.mean([(p > 0.5) == l for ps, (_, _, labels, _) in zip(probs, held_out) for p, l in zip(ps, labels)])
     print(f"Held out {len(held_out)} episodes ({sum(o is not None for o in onsets)} finished); "
           f"per-moment accuracy {100 * acc:.1f}%")
     for threshold in THRESHOLDS:
