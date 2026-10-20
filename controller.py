@@ -69,19 +69,24 @@ class SetpointController:
     """
     Holds a heading and depth at given surge and sway efforts. Used by the policy (in sim and on the Pi).
 
-    The target depth moves toward the commanded one at no more than
-    max_depth_target_rate m/s. A policy that flips its depth command from step to
-    step otherwise slams the vertical thrusters between extremes, which with the
-    thrusters' 0.5 s ramp set the pitch swinging and lost depth.
+    The targets move toward the commanded ones at limited rates: depth at
+    max_depth_target_rate m/s, heading at max_heading_target_rate deg/s. A policy
+    that flips its commands from step to step otherwise slams the thrusters
+    between extremes; with their 0.5 s ramp that set the pitch swinging and lost
+    depth, and made the sub wag in yaw. Steady turns and depth changes still go
+    through, just no faster than these rates.
     """
-    def __init__(self, gains: ControllerGains = None, max_depth_target_rate: float = 0.5):
+    def __init__(self, gains: ControllerGains = None, max_depth_target_rate: float = 0.5,
+                 max_heading_target_rate: float = 30.0):
         self.gains = gains or ControllerGains()
         self.max_depth_target_rate = max_depth_target_rate
+        self.max_heading_target_rate = max_heading_target_rate
         self.reset()
 
     def reset(self):
         self.depth_integral = 0.0
-        self.depth_target = None   # The rate-limited target actually being held
+        self.depth_target = None     # The rate-limited targets actually being held
+        self.heading_target = None
 
     def update(self, dt: float, depth: float, depth_rate: float, heading: float, pitch: float,
                pitch_rate: float, yaw_rate: float, target_heading: float, target_depth: float,
@@ -92,6 +97,12 @@ class SetpointController:
         step = self.max_depth_target_rate * dt
         self.depth_target += float(np.clip(target_depth - self.depth_target, -step, step))
         target_depth = self.depth_target
+        if self.heading_target is None:
+            self.heading_target = heading
+        turn_step = self.max_heading_target_rate * dt
+        self.heading_target = (self.heading_target
+                               + float(np.clip(angle_diff(target_heading, self.heading_target), -turn_step, turn_step))) % 360
+        target_heading = self.heading_target
         self.depth_integral = float(np.clip(self.depth_integral + (target_depth - depth) * dt,
                                             -g.depth_i_clamp, g.depth_i_clamp))
         heave, pitch_effort = depth_pitch_efforts(g, depth, depth_rate, self.depth_integral,
