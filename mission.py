@@ -25,7 +25,8 @@ skills in turn, switching only on things the real sub can measure:
                                     ~180° since the orbit began (and through at least
                                     ORBIT_TURN_DEG in total), and the marker has left the
                                     view to the side (last seen beyond the edge of the
-                                    view, or not seen for MARKER_GONE_S). That last check
+                                    view, or not seen for MARKER_GONE_S; sightings count once
+                                    seen MARKER_CONFIRM_FRAMES frames in a row). That last check
                                     separates the real finish (~270° around) from facing
                                     the gate with the marker still in between. And the
                                     marker must be on the side the sub has been turning
@@ -65,6 +66,8 @@ CLEAR_DEPTH_M = 1.5
 ORBIT_TURN_DEG = 135.0      # Total heading turn needed before handing back to the gate skill
 MARKER_GONE_S = 2.0         # The marker counts as out of view after this long unseen (longer than a dropout)...
 HALF_FOV_DEG = 35.0         # ...or if last seen beyond the edge of the view
+MARKER_CONFIRM_FRAMES = 3   # The handoff check counts a marker sighting only after this many frames in a row,
+                            # so a single false detection can't reset "marker gone" (seed 10018 hit the marker)
 HANDOFF_HEADING_DEG = 45.0  # Heading within this of reversed (as in orbit_env)
 SWEEP_DEG = 270.0           # Ground truth: what counts as having gone around the marker
 MIN_MARKER_DISTANCE_M = 1.5
@@ -154,6 +157,7 @@ class MissionRunner:
         self.dive_heading = env.readings.heading
         self.gate_was_close = False
         self.turned, self._prev_heading = 0.0, None
+        self._reset_marker()
         self.skill_action = np.zeros(3, dtype=np.float32)
         self.last_action = None
         self.switch_times = {}
@@ -167,6 +171,20 @@ class MissionRunner:
         return builder.update(r.depth, r.depth_rate, r.heading, r.pitch, r.imu.gyro_y, r.imu.gyro_z,
                               d.red_blobs if d else [], self.skill_action, env.control_period,
                               green_boxes=d.green_blobs if d else [])
+
+    def _reset_marker(self):
+        self.marker_streak, self.marker_seen_ever = 0, False
+        self.marker_abs_bearing, self.marker_unseen = 0.0, 0.0
+
+    def _update_marker(self, env):
+        """The handoff's own view of the marker: sightings count once confirmed over several frames."""
+        m = self.orbit_builder.marker
+        self.marker_streak = self.marker_streak + 1 if m.found else 0
+        if self.marker_streak >= MARKER_CONFIRM_FRAMES:
+            self.marker_seen_ever = True
+            self.marker_abs_bearing, self.marker_unseen = m.abs_bearing, 0.0
+        else:
+            self.marker_unseen += env.control_period
 
     def _passed_gate(self) -> bool:
         gate = self.gate_builder.gate
@@ -184,6 +202,7 @@ class MissionRunner:
         elif phase == "ORBIT":
             self.orbit_builder.reset()
             self.turned, self._prev_heading = 0.0, None
+            self._reset_marker()
         elif phase == "RETURN":
             self.gate_builder.reset()
             self.gate_was_close = False
@@ -208,11 +227,13 @@ class MissionRunner:
                 self.turned += _wrap(heading - self._prev_heading)
             self._prev_heading = heading
             o = self._update(env, self.orbit_builder)
+            self._update_marker(env)
             b = self.orbit_builder
             reversed_ = b.start_heading is not None and abs(_wrap(heading - b.start_heading - 180)) <= HANDOFF_HEADING_DEG
-            marker_gone = (b.marker.seen_ever and (b.marker.unseen >= MARKER_GONE_S
-                                                  or abs(b.marker.bearing(heading)) > HALF_FOV_DEG))
-            right_side = b.marker.seen_ever and b.marker.bearing(heading) * self.turned > 0
+            marker_bearing = _wrap(self.marker_abs_bearing - heading)
+            marker_gone = (self.marker_seen_ever and (self.marker_unseen >= MARKER_GONE_S
+                                                      or abs(marker_bearing) > HALF_FOV_DEG))
+            right_side = self.marker_seen_ever and marker_bearing * self.turned > 0
             if (b.gate.found and reversed_ and marker_gone and right_side
                     and abs(self.turned) >= ORBIT_TURN_DEG):
                 self._switch(env, "RETURN")
