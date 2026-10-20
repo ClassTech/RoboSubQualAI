@@ -5,6 +5,7 @@ tools/eval_gate.py (scoring), train.py and watch.py (viewing):
   scripted   the environment's scripted tasks (the baseline)
   random     random actions
   straight   hold the start heading at 1.5 m and drive forward
+  mission    the learned gate and orbit skills run in turn (mission.py), for --task mission
   <path>     a saved Stable-Baselines3 PPO model (.zip)
 
 Each controller's step(env, obs) advances the environment one control period
@@ -96,6 +97,17 @@ def policy_controller(model, normalizer=None, name: str = "policy") -> ActionCon
     return ActionController(name, choose)
 
 
+def load_policy(path: str):
+    """A saved PPO model and its observation normalization (None if there is none)."""
+    from stable_baselines3 import PPO
+    model = PPO.load(path, device="cpu")
+    normalizer = None
+    if os.path.exists(vecnormalize_path(path)):
+        with open(vecnormalize_path(path), "rb") as f:
+            normalizer = pickle.load(f)
+    return model, normalizer
+
+
 def make_controller(name: str, seed: int = 0, action_dim: int = 3):
     if name == "scripted":
         return ScriptedController()
@@ -105,10 +117,8 @@ def make_controller(name: str, seed: int = 0, action_dim: int = 3):
     if name == "straight":
         depth_action = (1.5 - DEPTH_MIN) / (DEPTH_MAX - DEPTH_MIN) * 2 - 1   # Target 1.5 m
         return ActionController("straight", lambda obs: np.array([0.0, depth_action, 0.6] + [0.0] * (action_dim - 3)))
-    from stable_baselines3 import PPO
-    model = PPO.load(name, device="cpu")
-    normalizer = None
-    if os.path.exists(vecnormalize_path(name)):
-        with open(vecnormalize_path(name), "rb") as f:
-            normalizer = pickle.load(f)
+    if name == "mission":
+        from mission import MissionRunner
+        return MissionRunner()
+    model, normalizer = load_policy(name)
     return policy_controller(model, normalizer, name)

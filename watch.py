@@ -70,8 +70,9 @@ class Viewer:
         lines = [f"Controller: {self.controller.name}   Detector: {a.detector}",
                  f"Episode {self.episode + 1}, seed {self.seed}   Time {env.time:4.1f} / {env.max_seconds:.0f} s",
                  f"Reward: last step {self.step_reward:+.2f}, total {self.total_reward:+.2f}"]
-        if isinstance(self.controller, ScriptedController):
-            lines.append(f"Scripted state: {self.controller.state_name()}")
+        if hasattr(self.controller, "state_name"):
+            label = "Scripted state" if isinstance(self.controller, ScriptedController) else "Phase"
+            lines.append(f"{label}: {self.controller.state_name()}")
         act = self.controller.last_action
         if act is not None:
             depth = DEPTH_MIN + (act[1] + 1) / 2 * (DEPTH_MAX - DEPTH_MIN)
@@ -108,8 +109,9 @@ class Viewer:
             lines.append(f"Marker: {seen}")
             if mt.seen_ever:
                 lines.append(f"  believes  bearing {mt.bearing(r.heading):+6.1f} deg, range {mt.range_m:5.2f} m")
-            lines += [f"  truth     bearing {m_bearing:+6.1f} deg, range {math.hypot(m.x - s.x, m.y - s.y):5.2f} m",
-                      f"Swept around marker {env.swept:+5.0f} deg   handoff ready: {env.handoff_ready()}"]
+            lines.append(f"  truth     bearing {m_bearing:+6.1f} deg, range {math.hypot(m.x - s.x, m.y - s.y):5.2f} m")
+            handoff = f"   handoff ready: {env.handoff_ready()}" if hasattr(env, "handoff_ready") else ""
+            lines.append(f"Swept around marker {env.swept:+5.0f} deg{handoff}")
         lines += ["",
                   f"Last episode: {self.last_outcome or '-'}",
                   "Totals: " + ", ".join(f"{self.outcome_names[k].lower()} {v}" for k, v in self.tally.items())]
