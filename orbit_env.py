@@ -72,8 +72,10 @@ class OrbitRewardConfig:
     face_gate: float = 4.0         # For facing the gate, phased in over the second half of the sweep
     depth_weight: float = 1.0      # Per meter from target_depth_m
     target_depth_m: float = 1.5
-    far_weight: float = 0.5        # Per meter farther than far_m from the marker
-    far_m: float = 3.0
+    far_weight: float = 1.0        # Per meter farther than far_m from the marker (in the progress measure)
+    far_m: float = 2.5
+    far_cost: float = 0.05         # Per step, per meter farther than far_m. The progress term alone gives back
+                                   # on the way in what it charges on the way out, so it didn't stop swing-outs
     success_bonus: float = 20.0
     collision_penalty: float = 5.0
     margin_cost: float = 0.1       # Per step inside the safety margin...
@@ -153,7 +155,9 @@ class OrbitEnv(SubTaskEnv):
     def _step_cost(self) -> float:
         """Keeping the marker in view while going around is how the sub stays safe with one forward camera."""
         rc, cost = self.reward_cfg, 0.0
-        inside = MIN_MARKER_DISTANCE_M - self._marker_distance()
+        distance = self._marker_distance()
+        cost += rc.far_cost * max(0.0, distance - rc.far_m)
+        inside = MIN_MARKER_DISTANCE_M - distance
         if inside > 0:
             cost += rc.margin_cost + rc.margin_cost_depth * inside / MIN_MARKER_DISTANCE_M
         if self._going_around():
