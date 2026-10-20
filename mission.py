@@ -32,9 +32,9 @@ skills in turn, switching only on things the real sub can measure:
 Each skill gets its own observation builder (the two policies see different
 layouts), reset when the skill takes over, as in training.
 
-Safety limit: during the orbit, the commanded depth is never shallower than
-ORBIT_MIN_DEPTH_M (the orbit tends to rise as it starts, and drifted back over
-the gate's top bar).
+Safety limit: the gate and orbit skills never command a depth shallower than
+MIN_DEPTH_M, matching the limit their environments train with (the opening
+is below 1.15 m, and both policies tended to rise and surface otherwise).
 """
 import math
 import random
@@ -49,7 +49,7 @@ GATE_POLICY = "runs/gate_wide_s1/best_model.zip"
 DIVE_DEPTH_M = 1.5
 DIVE_DONE_M = 1.3           # Dive is done below this...
 DIVE_STEADY_MPS = 0.1       # ...once the depth rate has settled under this
-ORBIT_MIN_DEPTH_M = 1.2
+MIN_DEPTH_M = 1.2
 ORBIT_POLICY = "runs/orbit_practice_s1/best_model.zip"
 
 PASS_RANGE_M = 2.5          # The gate counts as passed if last seen closer than this...
@@ -215,11 +215,12 @@ class MissionRunner:
             a = self.orbit_model.predict(self.orbit_norm.normalize_obs(o), deterministic=True)[0]
             self.skill_action = np.asarray(a, dtype=np.float32)
             action = self.skill_action.copy()
-            action[1] = max(action[1], self._depth_action(ORBIT_MIN_DEPTH_M))   # Safety limit on depth
+            action[1] = max(action[1], self._depth_action(MIN_DEPTH_M))   # Safety limit on depth
         elif self.phase in ("GATE", "RETURN"):
             a = self.gate_model.predict(self.gate_norm.normalize_obs(o), deterministic=True)[0]
             self.skill_action = np.asarray(a, dtype=np.float32)
             action = np.append(self.skill_action, 0.0)
+            action[1] = max(action[1], self._depth_action(MIN_DEPTH_M))   # Safety limit on depth
         else:
             # DIVE: hold the start heading, no thrust forward, dive to 1.5 m.
             # CLEAR: straight ahead at 1.5 m, holding the heading from the pass. DONE: hold position.
