@@ -27,7 +27,7 @@ class ControllerGains:
     depth_i: float = 0.4
     depth_d: float = 5.0
     depth_i_clamp: float = 2.0
-    pitch_p: float = 1.0
+    pitch_p: float = 0.2        # Was 1.0, which oscillated with the thrusters' 0.5 s ramp
     pitch_d: float = 1.5
     heading_p: float = 0.1      # Per degree of heading error
     yaw_d: float = 4.0          # Per rad/s of yaw rate

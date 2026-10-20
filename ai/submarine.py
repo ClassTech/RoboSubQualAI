@@ -34,7 +34,7 @@ class Submarine:
         self.DEPTH_P_GAIN = 2.5  # Was 2.8. Reduced slightly.
         self.DEPTH_I_GAIN = 0.4  # Was 0.15. Increased significantly to fight steady-state error.
         self.DEPTH_D_GAIN = 5.0  # Keep D gain high for now.
-        self.PITCH_P_GAIN = 1.0
+        self.PITCH_P_GAIN = 0.2   # Was 1.0, which oscillated with the thrusters' 0.5 s ramp
         self.PITCH_D_GAIN = 1.5
         
         # Integrals
