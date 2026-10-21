@@ -148,6 +148,7 @@ The display stays optional: training runs without a window, and the same physics
   - Orbit reward: the swing-out cost also charged the approach, so ending at the margin (-5) beat flying in (93-98% of training episodes ended "too close"); the sweep reward paid more for hugging the marker. Now a two-sided ring cost around 2 m, only once the sub joins the loop, and a "near" training rule (episode ends within 1.0 m, margin cost from 1.5 m). Orbit time limit 90 -> 120 s.
   - Perception: the foot-angle range needs the camera 0.4 m above the pole feet (at 0.2 m the depth sensor's zero error alone wrecked gate offsets), gate and orbit depth targets capped at 1.65 m, and a gate pair counts only after 3 frames in a row (a phantom red box paired with a real pole gave offsets 2-3 m wrong: the hidden cause of the gate's pole collisions).
   - **Gate `gate_phys6_ft`: forward 100/100 (nominal and varied), return 97/96. Orbit `orbit_ring3_ft`: 98/99, ~45 s, holds 1.7-2.0 m once on the ring. Mission: 59/60, 58/60 varied, 58/60 on 10000+ (175/180), ~99 s; scripted 57, 56, 58 (171/180), ~151 s.**
+  - Fine-tuning both from handoffs recorded on the new physics (`runs/handoffs_v3.json`; `gate_phys7_ft`, `orbit_ring4_ft`) scored 174/180: no gain, so the mission keeps `gate_phys6_ft` and `orbit_ring3_ft`.
 
 ## Phase 6: Export to the Pi 5 (deferred)
 - [ ] Export the weights plus the `VecNormalize` statistics, and write a plain-numpy forward pass.

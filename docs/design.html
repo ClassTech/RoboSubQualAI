@@ -110,7 +110,7 @@
 </nav>
 
 <h2 id="summary">Summary</h2>
-<p class="lede">Two learned skills fly the RoboSub qualification run in simulation in about 55 s. The scripted mission takes about 110 s. On fresh test starts the learned run succeeds 119 times in 120, the scripted one 115.</p>
+<p class="lede">Two learned skills fly the RoboSub qualification run in simulation in about 99 s. The scripted mission takes about 150 s. On 180 fresh test starts the learned run succeeds 175 times, the scripted one 171.</p>
 <p>The run is: dive, pass through the gate, go around the marker pole, and come back through the gate. A gate policy and an orbit policy each learned their part by reinforcement learning (PPO). Each skill also has a small learned done detector that says when its job is finished, so the runner only puts them in order.</p>
 <p>Five ideas shape the design:</p>
 <ol>
@@ -207,17 +207,20 @@
     <tr><td>Footprint</td><td>0.46 × 0.457 m</td><td>measured</td></tr>
     <tr><td>Height</td><td>0.25 m</td><td>measured</td></tr>
     <tr><td>Mass</td><td>4.0 kg, about 1 N buoyant</td><td>assumed</td></tr>
-    <tr><td>Thrusters</td><td>4 horizontal at the corners, angled 45°; 2 vertical, front and back</td><td>measured</td></tr>
+    <tr><td>Thrusters</td><td>4 horizontal at the corners, angled 45°; 2 vertical, one on each side (depth only; they can't control pitch)</td><td>measured</td></tr>
     <tr><td>Thruster lever arm</td><td>0.229 m (9")</td><td>measured</td></tr>
-    <tr><td>Thrust</td><td>0.8 N each, the same forward and reverse</td><td>assumed (symmetry measured)</td></tr>
+    <tr><td>Thrust</td><td>3.56 N (0.8 lbf) each, the same forward and reverse</td><td>measured</td></tr>
     <tr><td>Thruster ramp</td><td>0.5 s from zero to full and back, set by the sub's software</td><td>measured</td></tr>
     <tr><td>Yaw / pitch inertia</td><td>0.13 / 0.09 kg·m²</td><td>estimated from the layout: ¾" PVC frame, 4"×9" electronics tube, 4"×6"×4" battery box on top</td></tr>
-    <tr><td>Drag</td><td>per axis, quadratic</td><td>assumed</td></tr>
+    <tr><td>Drag</td><td>quadratic: 60 forward, 70 sideways, 80 vertical (N per (m/s)²); 1.4 in yaw and pitch</td><td>estimated from the frame's parts (tubes, ducts, boxes); the sub is blunt every way</td></tr>
+    <tr><td>Pitch</td><td>passive: weight below buoyancy rights it (2 N·m per radian)</td><td>observed: it drives flat</td></tr>
+    <tr><td>Resulting speeds</td><td>about 0.34 m/s forward, 0.32 m/s sideways, 0.3 m/s up or down, 87°/s turning; stops within about 0.25 m</td><td>from the above</td></tr>
   </tbody>
 </table></div>
 <p>There is no thruster dead zone. Battery sag is not modeled, since a run is short compared with battery life.</p>
 <h3>Physics</h3>
-<p>Each step sums thrust, quadratic drag per axis (forward, sideways, vertical, yaw, pitch) and net buoyancy, then integrates velocity and position in world coordinates. Each thruster follows its command at no more than 2.0 per second, matching the sub's 0.5 s ramp.</p>
+<p>Each step sums thrust, quadratic drag per axis (forward, sideways, vertical, yaw, pitch) and net buoyancy, then integrates velocity and position in world coordinates. Each thruster follows its command at no more than 2.0 per second, matching the sub's 0.5 s ramp. Pitch has no thruster acting on it, only the righting moment and drag.</p>
+<p>The first version of these numbers came from an older simulator built for a streamlined hull: 0.8 N of thrust and forward drag about a fifth of sideways drag. That sub coasted a long way toward and away from the marker, and the policies learned habits to fight it (pushing toward the marker to hold the circle) that pushed the real sub into it. With the measured thrust and the frame's real drag, the sub barely coasts.</p>
 <h3>Collisions and gate passes</h3>
 <p>The sub is a box turned to its heading; poles and the top bar are segments with a radius. On contact the sub returns to its last clear position and stops; repeated bumps within 0.5 s count as one collision. Every crossing of the gate's plane is recorded with its direction and whether it was inside the opening.</p>
 <h3>Varied dynamics</h3>
@@ -272,7 +275,7 @@
 <h3>From boxes to geometry (<code>perception.py</code>)</h3>
 <ul>
   <li><strong>Bearing:</strong> from the box's horizontal position and the field of view; positive is to the left.</li>
-  <li><strong>Range to a pole:</strong> the best of three methods. The pole's foot in view gives range from the angle down to it, using the known pool and sub depths (within 0.3% on clean boxes). Both ends in view gives range from the known length. Otherwise the apparent width is used, which is noisy for thin poles.</li>
+  <li><strong>Range to a pole:</strong> the best of three methods. The pole's foot in view gives range from the angle down to it, using the known pool and sub depths (within 0.3% on clean boxes), but only when the camera is at least 0.4 m above the foot: closer, the depth sensor's own zero error is a large share of the drop, and a sub flying 0.2 m off the floor got gate offsets 2–3 m wrong. Both ends in view gives range from the known length. Otherwise the apparent width is used, which is noisy for thin poles.</li>
   <li><strong>Gate pairing:</strong> <code>find_gate_pair()</code> picks the two tall red boxes that look like a pair; the scripted mission and the policies share it.</li>
   <li><strong>Gate geometry:</strong> from the two poles' positions, the gate's center, the turn needed to face straight through, and the sub's distance from the center line. The angle rests on a small difference of two ranges, so it is smoothed over about 1 s.</li>
 </ul>
@@ -292,6 +295,7 @@
 <h3>Memory and identity</h3>
 <p>When something drops out of view, its last values are kept, with "found" at 0 and the time since seen counting up. Bearings are corrected for how far the sub has turned since, but not for how far it has moved.</p>
 <p>Close to the gate only one pole fits in view, so a lone pole is labeled by whichever pole was last seen nearest to it. With no memory yet, a pole near the left edge is taken as the right pole, its partner being beyond that edge. The label is right 100% of the time with the perfect detector and 91% with noise.</p>
+<p>The gate, likewise, counts as found only once a pair of poles has been seen 3 frames in a row; until then the boxes are treated as lone poles. A one-frame phantom red box paired with a real pole had produced gate offsets 2–3 m wrong, and the gate policy steered into the pole: on the real (slower) physics the sub spends seconds near the gate with one pole in view, so this caused most of its collisions.</p>
 <p>The marker track only accepts a sighting once it has been seen 3 frames in a row. The detector's one-frame false positives then can't move the remembered marker. In one test run, a single phantom green box made the orbit think the marker was dead ahead just as it finished; it went searching and backed into the real marker.</p>
 <p>Heading is measured from the start of the run, not from north, so a policy can't memorize the gate's compass direction.</p>
 <h3>A real example</h3>
@@ -311,10 +315,10 @@
 <p>The sub's own control loops (<code>controller.py</code>) turn the policy's targets into thruster commands 60 times a second. The scripted mission and both policies share this code, and it is written to run on the Pi unchanged.</p>
 <h3>The loops</h3>
 <ul>
-  <li><strong>Depth:</strong> PID on measured depth, with the derivative taken from the filtered depth rate.</li>
-  <li><strong>Pitch:</strong> PD toward level, at 0.2 per degree.</li>
+  <li><strong>Depth:</strong> PID on measured depth (P 9, I 0.1, D 3), with the derivative taken from the filtered depth rate. A 0.5 m change settles in about 4.4 s with about 3 cm overshoot. Both vertical thrusters push together.</li>
+  <li><strong>Pitch:</strong> not controlled. The vertical thrusters are on the sides, and the sub is stable in pitch on its own.</li>
   <li><strong>Heading:</strong> PD toward the target heading, using the gyro for the derivative.</li>
-  <li><strong>Mixer:</strong> turns forward, sideways, yaw, heave and pitch efforts into the six thruster commands.</li>
+  <li><strong>Mixer:</strong> turns forward, sideways, yaw and heave efforts into the six thruster commands.</li>
 </ul>
 <h3>Safeguards, and the problem each one fixed</h3>
 <p>Each of these was added after a failure that looked at first like a policy problem.</p>
@@ -322,13 +326,13 @@
   <thead><tr><th>Safeguard</th><th>Problem it fixed</th></tr></thead>
   <tbody>
     <tr><td>Horizontal and vertical thrusters scale down separately when a command exceeds 1</td><td>Scaling all six together let hard maneuvering steal vertical thrust, and the buoyant sub floated to the surface. Every early orbit policy flew its loop on the surface.</td></tr>
-    <tr><td>Pitch gain 0.2 per degree (was 1.0)</td><td>With the 0.5 s thruster ramp, the old gain oscillated by ±12°; the vertical thrusters fought each other and the sub could not dive.</td></tr>
+    <tr><td>Depth gains P 9, I 0.1, D 3 (were 2.5, 0.4, 5.0)</td><td>Retuned by step tests for the measured thrust and drag. The old gains took 18 s to settle a 0.5 m change and overshot 19 cm: the integral wound up during the slow vertical transit.</td></tr>
     <tr><td>Depth target moves at most 0.5 m/s</td><td>The orbit policy flipped its depth command between 1.2 and 1.9 m step to step, which set the pitch swinging and surfaced the sub in 18% of varied runs.</td></tr>
     <tr><td>Heading target moves at most 30°/s</td><td>The policies steered near bang-bang, about ±27–31° every 0.1 s, so the sub wagged at 25–33°/s. With the limit it turns at 10–12°/s and runs got faster.</td></tr>
-    <tr><td>Gate and orbit never aim shallower than 1.2 m</td><td>Both policies sometimes rose and surfaced. The gate's opening is below 1.15 m, so neither ever needs a shallower target.</td></tr>
+    <tr><td>Gate and orbit aim between 1.2 and 1.65 m deep</td><td>Above: both policies sometimes rose and surfaced, and the opening is below 1.15 m. Below: a gate policy drifted to the deepest target allowed (1.9 m, 0.2 m off the floor), where it can't range the poles; once its depth output was pinned at the limit, training gave no signal to bring it back.</td></tr>
   </tbody>
 </table></div>
-<p>The gains other than pitch are the scripted sub's tuned values. All of them will be retuned in the pool, which is why training varies them by ±30%.</p>
+<p>The heading gains are the scripted sub's tuned values. All of them will be retuned in the pool, which is why training varies them by ±30%.</p>
 
 <h2 id="networks">The neural networks</h2>
 <p>Each skill has two small networks, an actor and a critic, each with two hidden layers of 128 neurons. Only the actors would run on the sub: about 65,000 numbers for both skills, a few microseconds a decision on a Pi.</p>
@@ -437,13 +441,13 @@
   <li><strong>Recorded starts:</strong> 30% of training episodes start where the mission actually hands over the return, moving at about 0.75 m/s.</li>
 </ul>
 <h3>Orbit</h3>
-<p>The sub starts 1–5 m past the gate and must go around the marker on either side, then face back toward the gate, within 90 s.</p>
+<p>The sub starts 1–5 m past the gate and must go around the marker on either side, then face back toward the gate, within 120 s.</p>
 <ul>
   <li><strong>Sway</strong> is a fourth action. The only camera faces forward (±35°), so to keep the marker in view the sub faces it and slides sideways around it, as the scripted orbit does.</li>
   <li><strong>Success</strong> needs both a truth check (at least 270° swept around the marker) and a measurable handoff (the gate in view, the heading turned about 180°).</li>
-  <li><strong>Safety margin:</strong> 1.5 m from the marker's center; contact is at about 0.38 m. Training ends an episode on entering it (<code>--margin-rule hard</code>), which teaches clearance reliably. Scoring follows the real-world rule instead: only a collision fails, and each step inside the margin costs reward.</li>
+  <li><strong>Safety margin:</strong> 1.5 m from the marker's center; contact is at about 0.38 m. Training uses the "near" rule (<code>--margin-rule near</code>): each step inside costs reward, and only coming within 1.0 m ends the episode. Scoring follows the real-world rule: only a collision fails. (Ending episodes at 1.5 m, the earlier "hard" rule, stopped almost every training episode a third of the way around on the real physics.)</li>
   <li><strong>Progress:</strong> degrees swept around the marker, then facing the gate (phased in after 180°), at 1.5 m depth.</li>
-  <li><strong>Costs each step:</strong> for the marker sitting off the camera's center (full cost when out of view), and for being more than 2.5 m out, so the loop stays tight.</li>
+  <li><strong>Costs each step:</strong> for the marker sitting off the camera's center (full cost when out of view), and, once the sub has joined the loop, for being off a 2 m ring around the marker, in or out.</li>
   <li><strong>Practice starts:</strong> a third of training episodes begin 150–300° around the marker, so the last step (stop facing the marker, turn to the gate) gets plenty of practice.</li>
   <li><strong>Recorded starts:</strong> 40% begin where the mission actually hands over the orbit, again moving at about 0.75 m/s.</li>
 </ul>
@@ -489,11 +493,11 @@
     <tr><td>Sweep</td><td class="num">2.0 / rad</td><td>Pays for angle swept around the marker, up to 270°</td><td>The main guide: about 9.4 for a full loop, in either direction. Measured as angle around the marker, so swinging wide gains nothing.</td></tr>
     <tr><td>Face the gate</td><td class="num">4.0</td><td>Pays for heading toward the gate, phased in from 180° to 270° swept</td><td>The loop's last step: stop facing the marker and turn to the gate. Phased in so it doesn't pull the sub around early. Raised from 2 to 4 with practice starts, when the orbit wasn't learning that step.</td></tr>
     <tr><td>Depth error</td><td class="num">1.0 / m</td><td>Counts distance from 1.5 m deep against progress</td><td>Keeps the loop at the depth the return needs.</td></tr>
-    <tr><td>Too far (progress)</td><td class="num">1.0 / m</td><td>Counts distance beyond 2.5 m from the marker against progress</td><td>Keeps the loop near the margin. On its own it didn't stop swing-outs: as a change in score, it paid back on the way in what it charged on the way out.</td></tr>
-    <tr><td>Too far (each step)</td><td class="num">−0.05 / m / step</td><td>Charged every step for each meter beyond 2.5 m</td><td>The fix for swing-outs. A cost per step can't be paid back, so going wide early now costs for as long as it lasts. The early swing-out median fell from 5.0 m to 3.3 m.</td></tr>
+    <tr><td>Too far (progress)</td><td class="num">1.0 / m</td><td>Counts distance beyond 2 m from the marker against progress</td><td>Draws the sub in. On its own it didn't stop swing-outs: as a change in score, it paid back on the way in what it charged on the way out.</td></tr>
+    <tr><td>Off the ring (each step)</td><td class="num">−0.15 / m / step</td><td>Charged every step for each meter off a 2 m ring, in or out, once the sub has come within 2.25 m</td><td>A cost per step can't be paid back, so it stops swing-outs. Two-sided because the sweep reward pays per degree, and a smaller circle sweeps degrees faster: without the inner side, policies hugged the margin. Not on the approach: charged from the start (5–9 m out), it made ending the episode at the margin (−5) cheaper than flying in, and 93–98% of training episodes ended that way. Once on the ring the loop holds 1.7–2.0 m.</td></tr>
     <tr><td>Marker off center</td><td class="num">−0.04 / step</td><td>Scaled by how far the marker is from the image center; full when out of view more than 0.5 s</td><td>With one forward camera, keeping the marker in view is how the sub stays safe. Without it the first orbits flew mostly blind (16–30% of the loop in view); with it, about 85–90%. The 0.5 s grace covers normal detector dropouts.</td></tr>
     <tr><td>Inside the margin</td><td class="num">−0.1 / step, plus up to −0.5</td><td>Charged each step closer than 1.5 m, more the deeper inside</td><td>The real-world rule, used in scoring: getting close is bad but recoverable, and only contact fails.</td></tr>
-    <tr><td>Too close (training)</td><td class="num">−5</td><td>Ends the episode on entering the margin (<code>--margin-rule hard</code>)</td><td>From scratch, under only the per-step margin cost, policies never learned to go around and stuck near the marker. Training with this hard stop and then scoring with the soft rule gave the best results.</td></tr>
+    <tr><td>Too close (training)</td><td class="num">−5</td><td>Ends the episode within 1.0 m (<code>--margin-rule near</code>)</td><td>From scratch, under only the per-step margin cost, policies never learned to go around and stuck near the marker, so training needs a hard stop somewhere. At 1.5 m (the old "hard" rule), exploration on the real physics crossed it in almost every episode; at 1.0 m, the margin cost does the teaching and the stop only catches real blunders.</td></tr>
     <tr><td>Around and facing the gate</td><td class="num">+20</td><td>Success</td><td>As for the gate: bigger than all the shaping combined.</td></tr>
     <tr><td>Collision</td><td class="num">−5</td><td>Hitting the marker or the gate</td><td>A failure.</td></tr>
     <tr><td>Wrong way</td><td class="num">−5</td><td>Crossing back through the gate line during the orbit</td><td>Stops the orbit from "finishing" by heading straight back through the gate without going around.</td></tr>
@@ -529,26 +533,26 @@
 </ul>
 
 <h2 id="results">Results</h2>
-<p>The learned mission is now as reliable as the scripted one and about twice as fast. All scores below use the noisy detector and the thruster ramp. "Varied" means the dynamics were varied as in training.</p>
+<p>On the real physics the learned mission is a little more reliable than the scripted one and about a third faster. All scores below use the noisy detector, the thruster ramp and the measured thrust and drag. "Varied" means the dynamics were varied as in training.</p>
 <h3>Full mission, 60 fresh test starts</h3>
 <div class="table-wrap"><table>
   <thead><tr><th></th><th class="num">Nominal</th><th class="num">Varied</th><th class="num">Time (median)</th></tr></thead>
   <tbody>
-    <tr class="hl"><td>Learned skills + done detectors</td><td class="num">60/60 (100%)</td><td class="num">59/60 (98%)</td><td class="num">~55 s</td></tr>
-    <tr><td>Scripted mission</td><td class="num">57/60 (95%)</td><td class="num">58/60 (97%)</td><td class="num">~110 s</td></tr>
+    <tr class="hl"><td>Learned skills + done detectors</td><td class="num">59/60 (98%)</td><td class="num">58/60 (97%)</td><td class="num">~99 s</td></tr>
+    <tr><td>Scripted mission</td><td class="num">57/60 (95%)</td><td class="num">56/60 (93%)</td><td class="num">~151 s</td></tr>
   </tbody>
 </table></div>
-<p>The one failure was a false orbit-done just after an orbit began, which sent the sub back toward the gate. On the 10000+ starts it scored 59 of 60 (one missed gate). Successes take 55 s typically, 108 s at most.</p>
+<p>On the 10000+ starts the learned mission scored 58 of 60, the scripted one 58. Missions take longer than on the old physics (about 55 s then) because the real sub is about a third as fast.</p>
 <h3>Each skill, 100 test starts</h3>
 <div class="table-wrap"><table>
   <thead><tr><th>Skill</th><th class="num">Nominal</th><th class="num">Varied</th><th class="num">Time (median)</th></tr></thead>
   <tbody>
-    <tr><td>Gate, forward (to 1.5 m beyond)</td><td class="num">99%</td><td class="num">n/a</td><td class="num">10.6 s</td></tr>
-    <tr><td>Gate, return (to 1.5 m beyond)</td><td class="num">96%</td><td class="num">n/a</td><td class="num">14.0 s</td></tr>
-    <tr><td>Orbit</td><td class="num">99%</td><td class="num">100%</td><td class="num">30 s</td></tr>
+    <tr><td>Gate, forward (to 1.5 m beyond)</td><td class="num">100%</td><td class="num">100%</td><td class="num">23 s</td></tr>
+    <tr><td>Gate, return (to 1.5 m beyond)</td><td class="num">97%</td><td class="num">96%</td><td class="num">35 s</td></tr>
+    <tr><td>Orbit</td><td class="num">98%</td><td class="num">99%</td><td class="num">45 s</td></tr>
   </tbody>
 </table></div>
-<p>The mission uses <code>gate_carry_ft2</code> and <code>orbit_confirm_ft</code>, with a done detector beside each. Both were fine-tuned from states recorded at real mission handoffs, then with search starts and carry-through (gate) and confirmed marker sightings (orbit). The orbit row is for an earlier version; the current orbit scored 100% on the nominal test starts during training.</p>
+<p>The mission uses <code>gate_phys6_ft</code> and <code>orbit_ring3_ft</code>, with a done detector beside each, retrained on the real physics from the earlier policies.</p>
 <h3>How the scores were reached</h3>
 <div class="table-wrap"><table>
   <thead><tr><th>Step</th><th>Effect</th></tr></thead>
@@ -567,6 +571,7 @@
     <tr><td>Both skills fine-tuned from recorded mission handoffs</td><td>learned mission ~89% → 97%, no more wandering orbits</td></tr>
     <tr><td>Marker sightings confirmed over 3 frames; gate search starts</td><td>learned mission 115 → 118 of 120; no more missed gates on the return</td></tr>
     <tr><td>Done detectors replace the runner's rules; gate carries through</td><td>118 → 119 of 120, with no hand-written switching left</td></tr>
+    <tr><td>Real physics (measured thrust, frame drag, side vertical thrusters), retrained</td><td>first 152 of 180; then the orbit's ring cost, honest perception near the floor, confirmed gate pairs: 175 of 180 (scripted 171)</td></tr>
   </tbody>
 </table></div>
 
@@ -585,6 +590,8 @@
 <p><strong>Handoffs need care.</strong> Most learned-mission failures came from the runner's switching cues, not the skills: switching before the sub was through the gate, missing a pass, or handing back with the marker in between. Each cue was fixed using what the sub can measure.</p>
 <p><strong>Learn "when" by supervision, not reward.</strong> Deciding when a skill is finished is a yes-or-no question with a known answer at every moment in the simulator. Learned from reward, the answer arrived too rarely and the policies learned never to say done. Learned from labels, it took minutes.</p>
 <p><strong>Judge a component where it's used.</strong> The orbit detector's offline scores favored cautious settings that failed in the mission, because offline every early firing counted as an error while in the mission most were harmless.</p>
+<p><strong>Check the physics against the real sub.</strong> Thrust 4.4× too low and a streamlined hull's drag made a sub that coasted. Policies learned to fight the coasting, and on the real numbers the same habits drove them into the marker. A photo and one measurement fixed more than many training runs.</p>
+<p><strong>When a new physics breaks things, look for the loophole.</strong> On the real physics, three reward and perception flaws surfaced that the old numbers had hidden: a cost that made crashing the cheapest ending, a reward that paid for hugging the marker, and phantom gate pairs. Each showed up as "the policy is bad" and each was found by tracing what the policy saw and what it was paid for.</p>
 <p><strong>Fix it in learning, not in the runner.</strong> Every rule added to the runner makes the learned mission more like the scripted one. When a skill misbehaves, the first choice is to change what it trains on (search starts, recorded handoffs) or what it perceives (confirmed marker sightings), not to add a special case.</p>
 </div>
 

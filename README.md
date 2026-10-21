@@ -6,7 +6,7 @@ A simulator for a RoboSub pre-qualification run, and a reinforcement-learning (R
 
 ## What it does
 
-- **Simulates the pool and the sub realistically.** The simulation covers physics at 60 Hz, the sub's real size and thruster layout, and thrusters that ramp from zero to full in 0.5 s. Sensors (a 1280×960 camera, pressure, IMU with magnetometer) have noise and per-run errors. Gate poles and the marker are drawn at their real size.
+- **Simulates the pool and the sub realistically.** The simulation covers physics at 60 Hz, the sub's real size and thruster layout, its measured thrust (0.8 lbf per thruster) and the drag of its open frame, and thrusters that ramp from zero to full in 0.5 s. Sensors (a 1280×960 camera, pressure, IMU with magnetometer) have noise and per-run errors. Gate poles and the marker are drawn at their real size.
 - **Flies the course two ways:**
   - **Scripted:** the original hand-written mission, kept as the baseline.
   - **Learned:** two small neural-network skills, *gate* and *orbit*. Each skill has a small learned *done detector* that says when it's finished; the runner just runs them in order.
@@ -20,10 +20,10 @@ On fresh test starts, with the noisy detector:
 
 | Full mission | Success, nominal | Success, varied dynamics | Typical time |
 |---|---|---|---|
-| Scripted mission | 57/60 | 58/60 | ~110 s |
-| **Learned skills + done detectors** | **60/60** | **59/60** | **~55 s** |
+| Scripted mission | 57/60 | 56/60 | ~151 s |
+| **Learned skills + done detectors** | **59/60** | **58/60** | **~99 s** |
 
-The learned mission is as reliable as the scripted one and takes about half the time, with no hand-written switching rules: each skill's detector decides when to move on.
+The learned mission is a little more reliable than the scripted one and about a third faster, with no hand-written switching rules: each skill's detector decides when to move on.
 
 Running the policies on the sub's Raspberry Pi is planned but deferred.
 
@@ -46,8 +46,8 @@ python3.12 -m venv .venv
 # Watch the learned mission, the scripted one, or a single skill
 .venv/bin/python watch.py mission --task mission
 .venv/bin/python watch.py scripted --task mission
-.venv/bin/python watch.py runs/gate_mstart_ft/final_model.zip --task gate
-.venv/bin/python watch.py runs/orbit_mstart_ft/final_model.zip --task orbit
+.venv/bin/python watch.py runs/gate_phys6_ft/final_model.zip --task gate
+.venv/bin/python watch.py runs/orbit_ring3_ft/final_model.zip --task orbit
 
 # Train a skill (--task gate | orbit; --randomize varies the dynamics; --resume fine-tunes)
 .venv/bin/python train.py --name my_gate --task gate --detector noisy --wide-starts --randomize --steps 2000000
