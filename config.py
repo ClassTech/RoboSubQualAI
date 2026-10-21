@@ -44,16 +44,24 @@ class SimulationConfig:
     subInertia_Z: float = 0.13  # Yaw (kg m^2). Mostly frame perimeter and thrusters.
     subInertia_Y: float = 0.09  # Pitch (kg m^2)
     
-    thrusterMaxForce: float = 0.8 # Max force per thruster (N); the same forward and reverse
+    thrusterMaxForce: float = 3.56 # Max force per thruster (N): 0.8 lbf, measured; the same forward and reverse
     thrusterRampSec: float = 0.5  # The sub's software limits each thruster to 0.5 s from zero to full (and back)
     
-    # Drag Coefficients (TUNE THESE)
-    surgeDragCoeff: float = 1.5   # Forward/backward 
-    swayDragCoeff: float = 8.0    # Side-to-side
-    heaveDragCoeff: float = 8.0   # Up/down (Assumed same as sway)
-    
-    angularDragCoeff_Z: float = 0.25 # Yaw drag
-    angularDragCoeff_Y: float = 0.25 # Pitch drag (Assumed same as yaw)
+    # Quadratic drag, force = coeff * v|v| (N per (m/s)^2), estimated as 0.5 * rho * Cd * A from the
+    # open frame's parts: the 3/4in PVC tubes facing the flow, the thruster ducts, the battery box
+    # and the electronics tube (Cd about 1.0-1.2 for the tubes and boxes, 0.5 for the dome). The sub is
+    # blunt every way; forward is only slightly less draggy than sideways. Top speed at full thrust is
+    # then about 0.4 m/s either way, and it stops almost at once. (The old values, 1.5 forward and 8
+    # sideways, were from a streamlined hull: the sub coasted toward and away from the marker.)
+    surgeDragCoeff: float = 60.0  # Forward/backward: about 0.12 m^2 of drag area
+    swayDragCoeff: float = 70.0   # Side-to-side: the tube and battery box are longer than wide
+    heaveDragCoeff: float = 80.0  # Up/down: the frame's top and bottom rectangles of tube, plus the boxes
+
+    # Angular drag, torque = coeff * w|w| (N m per (rad/s)^2): each part's drag at its distance from
+    # the center, summed (frame tubes and posts at ~0.23-0.3 m, thrusters at 9in)
+    angularDragCoeff_Z: float = 1.4  # Yaw
+    angularDragCoeff_Y: float = 1.4  # Pitch
+    pitchRightingMoment: float = 2.0 # N m per radian of pitch: weight below buoyancy keeps it level
     
     # Buoyancy
     gravity: float = 9.81

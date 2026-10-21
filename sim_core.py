@@ -109,7 +109,7 @@ class SubSim:
         """The sub's software limits how fast each thruster's command can change."""
         step = dt / self.config.thrusterRampSec if self.config.thrusterRampSec > 0 else float("inf")
         t = self.thrust
-        for name in ("hfl", "hfr", "hal", "har", "vf", "vr"):
+        for name in ("hfl", "hfr", "hal", "har", "vl", "vr"):
             cur, want = getattr(t, name), getattr(commands, name)
             setattr(t, name, cur + max(-step, min(step, want - cur)))
         return t
@@ -120,13 +120,14 @@ class SubSim:
         f_max = c.thrusterMaxForce
         f_hfl, f_hfr = commands.hfl * f_max, commands.hfr * f_max
         f_hal, f_har = commands.hal * f_max, commands.har * f_max
-        f_vf, f_vr = commands.vf * f_max, commands.vr * f_max
+        f_vl, f_vr = commands.vl * f_max, commands.vr * f_max
         cos_45 = 0.7071
         thrust_surge = (f_hfl + f_hfr + f_hal + f_har) * cos_45
         thrust_sway = (f_hfl - f_hfr - f_hal + f_har) * cos_45
-        thrust_heave = f_vf + f_vr
+        thrust_heave = f_vl + f_vr   # The vertical pair is on the sides: no pitch torque (roll isn't modeled)
         thrust_yaw = (f_hfl - f_hfr + f_hal - f_har) * self.yaw_lever_arm
-        thrust_pitch = (f_vf - f_vr) * c.thrusterArm
+        # Pitch is passive: weight below buoyancy rights the sub (it drives flat)
+        righting_pitch = -c.pitchRightingMoment * math.sin(math.radians(s.pitch))
 
         h_rad, p_rad = math.radians(s.heading), math.radians(s.pitch)
         cos_h, sin_h = math.cos(h_rad), math.sin(h_rad)
@@ -153,7 +154,7 @@ class SubSim:
         s.velocity_y += ay * dt
         s.velocity_z += az * dt
         s.angular_velocity_z += (thrust_yaw + drag_yaw) / c.subInertia_Z * dt
-        s.angular_velocity_y += (thrust_pitch + drag_pitch) / c.subInertia_Y * dt
+        s.angular_velocity_y += (righting_pitch + drag_pitch) / c.subInertia_Y * dt
         self.true_imu = MPU6050Readings(
             accel_x=-ax * sin_h + ay * cos_h,   # Sway
             accel_y=ax * cos_h + ay * sin_h,    # Surge

@@ -50,6 +50,9 @@ class RewardConfig:
 class GateEnv(SubTaskEnv):
     OUTCOMES = ("is_success", "collision", "missed_gate", "surfaced", "timeout")
     MIN_TARGET_DEPTH_M = 1.2   # The opening is below 1.15 m, so the gate never needs to aim shallower
+    MAX_TARGET_DEPTH_M = 1.65  # At least 0.44 m above the pole feet (floor 2.09 m), so perception can range them.
+                               # Allowed down to 1.9 m, a policy got stuck there (its depth output clipped at
+                               # the limit gives no learning signal) and misjudged the gate by 2-3 m
 
     def __init__(self, detector_mode: str = "perfect", control_period: float = 0.1,
                  max_seconds: float = 60.0, start: Optional[StartConfig] = None,

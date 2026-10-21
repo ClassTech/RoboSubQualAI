@@ -23,32 +23,33 @@ def angle_diff(a1: float, a2: float) -> float:
 
 @dataclass
 class ControllerGains:
-    depth_p: float = 2.5
-    depth_i: float = 0.4
-    depth_d: float = 5.0
+    # Depth gains retuned for the measured thrust (3.56 N per thruster) and the draggy frame: settles a
+    # 0.5 m step in ~4.4 s with ~3 cm overshoot. (The old 2.5 / 0.4 / 5.0 took ~18 s and overshot 19 cm:
+    # the integral wound up during the slow vertical transit.)
+    depth_p: float = 9.0
+    depth_i: float = 0.1
+    depth_d: float = 3.0
     depth_i_clamp: float = 2.0
-    pitch_p: float = 0.2        # Was 1.0, which oscillated with the thrusters' 0.5 s ramp
-    pitch_d: float = 1.5
     heading_p: float = 0.1      # Per degree of heading error
     yaw_d: float = 4.0          # Per rad/s of yaw rate
 
 
-def depth_pitch_efforts(gains: ControllerGains, depth: float, depth_rate: float, depth_integral: float,
-                        target_depth: float, pitch: float, pitch_rate: float, target_pitch: float = 0.0):
-    """Heave and pitch efforts in [-1, 1]. depth_integral is the accumulated depth error (m s)."""
+def depth_effort(gains: ControllerGains, depth: float, depth_rate: float, depth_integral: float,
+                 target_depth: float) -> float:
+    """Heave effort in [-1, 1]. depth_integral is the accumulated depth error (m s)."""
     heave = (target_depth - depth) * gains.depth_p + depth_integral * gains.depth_i - depth_rate * gains.depth_d
-    pitch_effort = angle_diff(target_pitch, pitch) * gains.pitch_p - pitch_rate * gains.pitch_d
-    return float(np.clip(heave, -1.0, 1.0)), float(np.clip(pitch_effort, -1.0, 1.0))
+    return float(np.clip(heave, -1.0, 1.0))
 
 
 def yaw_effort(gains: ControllerGains, heading: float, yaw_rate: float, target_heading: float) -> float:
     return float(np.clip(angle_diff(target_heading, heading) * gains.heading_p - yaw_rate * gains.yaw_d, -1.0, 1.0))
 
 
-def mix(surge: float, sway: float, yaw: float, heave: float, pitch: float) -> ThrusterCommands:
+def mix(surge: float, sway: float, yaw: float, heave: float) -> ThrusterCommands:
     """
-    Mixes 5-axis efforts into 6 thruster commands. The horizontal and vertical
-    thrusters are separate hardware, so each group is scaled down on its own if
+    Mixes 4-axis efforts into 6 thruster commands. The two vertical thrusters are
+    on the sides, so they only move the sub up and down (pitch is passively
+    stable, not controlled). The horizontal group is scaled down on its own if
     any of its commands exceeds 1. (Scaling all six together meant hard turning
     and sliding cut the vertical thrust, and the buoyant sub floated up.)
     """
@@ -57,11 +58,9 @@ def mix(surge: float, sway: float, yaw: float, heave: float, pitch: float) -> Th
     c = ThrusterCommands(
         hfl=surge_cmd + sway_cmd + yaw, hfr=surge_cmd - sway_cmd - yaw,
         hal=surge_cmd - sway_cmd + yaw, har=surge_cmd + sway_cmd - yaw,
-        vf=heave + pitch, vr=heave - pitch)
+        vl=heave, vr=heave)
     h_max = max(1.0, abs(c.hfl), abs(c.hfr), abs(c.hal), abs(c.har))
     c.hfl /= h_max; c.hfr /= h_max; c.hal /= h_max; c.har /= h_max
-    v_max = max(1.0, abs(c.vf), abs(c.vr))
-    c.vf /= v_max; c.vr /= v_max
     return c
 
 
@@ -105,7 +104,6 @@ class SetpointController:
         target_heading = self.heading_target
         self.depth_integral = float(np.clip(self.depth_integral + (target_depth - depth) * dt,
                                             -g.depth_i_clamp, g.depth_i_clamp))
-        heave, pitch_effort = depth_pitch_efforts(g, depth, depth_rate, self.depth_integral,
-                                                  target_depth, pitch, pitch_rate)
+        heave = depth_effort(g, depth, depth_rate, self.depth_integral, target_depth)
         yaw = yaw_effort(g, heading, yaw_rate, target_heading)
-        return mix(float(np.clip(surge, -1.0, 1.0)), float(np.clip(sway, -1.0, 1.0)), yaw, heave, pitch_effort)
+        return mix(float(np.clip(surge, -1.0, 1.0)), float(np.clip(sway, -1.0, 1.0)), yaw, heave)

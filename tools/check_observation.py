@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gate_controllers import make_controller          # noqa: E402
 from gate_env import GateEnv                           # noqa: E402
-from observation import BEARING_SCALE, INDEX, MAX_UNSEEN, ObservationBuilder  # noqa: E402
+from observation import GATE_CONFIRM_FRAMES, BEARING_SCALE, INDEX, MAX_UNSEEN, ObservationBuilder  # noqa: E402
 
 
 def wrap(deg):
@@ -106,7 +106,8 @@ def check_memory(camera):
     w, h = camera.width, camera.height
     poles = [{'center_x': x, 'center_y': h / 2, 'width': 6, 'height': 200, 'min_x': x - 3, 'max_x': x + 3,
               'min_y': h / 2 - 100, 'max_y': h / 2 + 100, 'area': 1000} for x in (w / 2 - 100, w / 2 + 100)]
-    b.update(1.5, 0.0, 100.0, 0.0, 0.0, 0.0, poles, [0, 0, 0], 0.1)
+    for _ in range(GATE_CONFIRM_FRAMES):   # A pair counts as the gate once seen this many frames in a row
+        b.update(1.5, 0.0, 100.0, 0.0, 0.0, 0.0, poles, [0, 0, 0], 0.1)
     obs = b.update(1.5, 0.0, 130.0, 0.0, 0.0, 0.0, [], [0, 0, 0], 0.1)
     found, bearing, unseen = obs[INDEX["gate_found"]], obs[INDEX["gate_bearing"]], obs[INDEX["gate_unseen"]]
     bearing_deg, unseen_s = bearing * BEARING_SCALE, unseen * MAX_UNSEEN

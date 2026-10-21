@@ -210,9 +210,10 @@ def main():
     parser.add_argument("--learning-rate", type=float, default=3e-4, help="Starting learning rate; falls linearly to 0")
     parser.add_argument("--resume", help="Continue training from this checkpoint .zip (and its _vecnormalize.pkl) "
                                          "instead of starting fresh; --task must match")
-    parser.add_argument("--margin-rule", choices=["hard", "soft"], default="hard",
+    parser.add_argument("--margin-rule", choices=["hard", "near", "soft"], default="hard",
                         help="Orbit skill, training only: whether entering the marker's safety margin ends the "
-                             "episode (hard, learns more reliably) or just costs reward (soft). Scoring always uses soft")
+                             "episode (hard, learns more reliably), only coming within 1 m does (near), or it just "
+                             "costs reward (soft). Scoring always uses soft")
     parser.add_argument("--randomize", action="store_true",
                         help="Training only: vary PID gains, inertia, drag and thrust each episode "
                              "(config.RandomizationConfig). Scored tests use nominal values")

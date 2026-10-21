@@ -10,7 +10,7 @@ from typing import Tuple, List, Optional
 from data_structures import ThrusterCommands, SensorSuite, Vision
 # ---
 from config import SimulationConfig
-from controller import ControllerGains, angle_diff, depth_pitch_efforts, yaw_effort, mix
+from controller import ControllerGains, angle_diff, depth_effort, yaw_effort, mix
 from ai.tasks import TaskStatus # Corrected import
 from ai.tasks.task_base import Task
 
@@ -30,11 +30,10 @@ class Submarine:
 
        # --- Vertical (Z/Pitch) Gains (TUNE ME) ---
         # --- Adjusted P and I gains ---
-        self.DEPTH_P_GAIN = 2.5  # Was 2.8. Reduced slightly.
-        self.DEPTH_I_GAIN = 0.4  # Was 0.15. Increased significantly to fight steady-state error.
-        self.DEPTH_D_GAIN = 5.0  # Keep D gain high for now.
-        self.PITCH_P_GAIN = 0.2   # Was 1.0, which oscillated with the thrusters' 0.5 s ramp
-        self.PITCH_D_GAIN = 1.5
+        # Retuned for the measured thrust and drag; see controller.ControllerGains
+        self.DEPTH_P_GAIN = 9.0
+        self.DEPTH_I_GAIN = 0.1
+        self.DEPTH_D_GAIN = 3.0
         
         # Integrals
         self.integral_x_err = 0.0
@@ -152,21 +151,16 @@ class Submarine:
     # === NEW/UPDATED CONTROL HELPERS ===
     # ---
 
-    def get_depth_pitch_commands(self, sensors: SensorSuite, 
-                                 target_depth: float, 
-                                 target_pitch: float = 0.0) -> Tuple[float, float]:
-        """
-        Calculates heave (vertical) and pitch commands using PID for depth.
-        Returns: (heave_command, pitch_command)
-        """
-        return depth_pitch_efforts(self.gains(), sensors.depth, sensors.depth_rate, self.integral_z_err,
-                                   target_depth, sensors.pitch, sensors.imu.gyro_y, target_pitch)
+    def get_heave_command(self, sensors: SensorSuite, target_depth: float) -> float:
+        """Heave (vertical) command from the depth PID. Pitch isn't controlled: the vertical
+        thrusters are on the sides, and the sub is passively stable in pitch."""
+        return depth_effort(self.gains(), sensors.depth, sensors.depth_rate, self.integral_z_err, target_depth)
 
     def gains(self) -> ControllerGains:
         """This sub's gains in the shared controller's form."""
         return ControllerGains(depth_p=self.DEPTH_P_GAIN, depth_i=self.DEPTH_I_GAIN, depth_d=self.DEPTH_D_GAIN,
-                               depth_i_clamp=self.integral_clamp_z, pitch_p=self.PITCH_P_GAIN,
-                               pitch_d=self.PITCH_D_GAIN, heading_p=self.HOVER_YAW_P_GAIN, yaw_d=self.YAW_D_GAIN)
+                               depth_i_clamp=self.integral_clamp_z, heading_p=self.HOVER_YAW_P_GAIN,
+                               yaw_d=self.YAW_D_GAIN)
 
     def _get_damping_commands(self, sensors: SensorSuite) -> ThrusterCommands:
         """Fully damps all 6 axes of motion.
@@ -179,9 +173,9 @@ class Submarine:
         yaw = -sensors.imu.gyro_z * self.YAW_D_GAIN 
         
         # Hold current depth
-        heave, pitch = self.get_depth_pitch_commands(sensors, sensors.depth, 0.0)
+        heave = self.get_heave_command(sensors, sensors.depth)
         
-        return self._mix_and_normalize_commands(surge, sway, yaw, heave, pitch)
+        return self._mix_and_normalize_commands(surge, sway, yaw, heave)
 
     def get_spin_damping_commands(self, sensors: SensorSuite, target_depth: Optional[float] = None):
         """Damps everything *except* yaw, while holding depth.
@@ -192,9 +186,9 @@ class Submarine:
         h_rad, cos_h, sin_h = math.radians(sensors.heading), math.cos(math.radians(sensors.heading)), math.sin(math.radians(sensors.heading))
         surge, sway = wdx * cos_h + wdy * sin_h, -wdx * sin_h + wdy * cos_h
         
-        heave, pitch = self.get_depth_pitch_commands(sensors, target_depth, 0.0)
+        heave = self.get_heave_command(sensors, target_depth)
         
-        return self._mix_and_normalize_commands(surge, sway, 0.0, heave, pitch)
+        return self._mix_and_normalize_commands(surge, sway, 0.0, heave)
 
     def get_heading_commands(self, sensors, heading, 
                              surge_power=0.0, 
@@ -211,9 +205,9 @@ class Submarine:
         sway = np.clip(sway_power, -1.0, 1.0)
         
         # Vertical Control
-        heave, pitch = self.get_depth_pitch_commands(sensors, target_depth, target_pitch)
+        heave = self.get_heave_command(sensors, target_depth)
         
-        return self._mix_and_normalize_commands(surge_power, sway, yaw, heave, pitch)
+        return self._mix_and_normalize_commands(surge_power, sway, yaw, heave)
 
     def _get_pid_hover_commands(self, sensors: SensorSuite, dt: float, 
                                 tx: float, ty: float, 
@@ -237,10 +231,10 @@ class Submarine:
         yaw_cmd = np.clip(yaw_p + yaw_d, -1.0, 1.0)
         
         # --- Vertical Z/Pitch Control (PID for Z, PD for Pitch) ---
-        heave, pitch = self.get_depth_pitch_commands(sensors, tz, 0.0)
+        heave = self.get_heave_command(sensors, tz)
         
-        return self._mix_and_normalize_commands(surge, sway, yaw_cmd, heave, pitch)
+        return self._mix_and_normalize_commands(surge, sway, yaw_cmd, heave)
 
-    def _mix_and_normalize_commands(self, surge, sway, yaw, heave, pitch) -> ThrusterCommands:
-        """Mixes 5-axis commands into 6 thruster commands (shared controller.mix)."""
-        return mix(surge, sway, yaw, heave, pitch)
+    def _mix_and_normalize_commands(self, surge, sway, yaw, heave) -> ThrusterCommands:
+        """Mixes 4-axis commands into 6 thruster commands (shared controller.mix)."""
+        return mix(surge, sway, yaw, heave)

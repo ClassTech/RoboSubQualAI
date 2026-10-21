@@ -35,7 +35,7 @@ class GateTask(Task):
                            yaw_rate_tolerance=0.05),
             Stabilize(duration=1.0, speed_threshold=0.1),
             DriveUntilTargetLost(surge_power=0.6, target_type='gate'),
-            DriveStraight(duration=4.0, surge_power=0.6),
+            DriveStraight(duration=12.0, surge_power=0.6),   # ~3 m at the measured thrust and drag (was 4 s)
             Stabilize(duration=1.0)
         ]
 

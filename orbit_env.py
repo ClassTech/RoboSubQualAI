@@ -18,12 +18,16 @@ The done detector's label (done_label) is ground truth: swept SWEEP_DEG and
 facing the gate within DONE_FACING_DEG.
 Failures: a collision, crossing back through the gate plane early, or a timeout.
 
-The safety margin (MIN_MARKER_DISTANCE_M from the marker's center) has two rules:
+The safety margin (MIN_MARKER_DISTANCE_M from the marker's center) has three rules:
   soft  (default; the real-world rule, used for all scoring) only a collision
         fails; inside the margin costs reward every step, more the closer it gets
   hard  (for training) entering the margin ends the episode as "too_close", -5.
         Policies learn to stay clear much more reliably this way; from scratch
         under the soft rule they get stuck near the marker.
+  near  (for training) in between: the margin costs reward as in soft, and only
+        coming within NEAR_STOP_M ends the episode. With the real (draggy) physics,
+        exploration dipped inside 1.5 m in almost every hard-rule episode, so
+        policies never practiced the rest of the loop.
 
 Practice starts (training only): with practice_starts, a share of episodes
 start partway around the marker, facing it, with the sweep count and the
@@ -47,6 +51,7 @@ SWEEP_DEG = 270.0
 MARKER_GRACE_S = 0.5           # A dropout this short doesn't count as losing sight of the marker
 HALF_FOV_DEG = 35.0
 MIN_MARKER_DISTANCE_M = 1.5    # Safety margin, center to center; contact is at about 0.38 m
+NEAR_STOP_M = 1.0              # The "near" training rule ends episodes this close
 HANDOFF_HEADING_DEG = 45.0
 DONE_FACING_DEG = 30.0         # Done label: facing the gate's center within this
 
@@ -76,9 +81,18 @@ class OrbitRewardConfig:
     depth_weight: float = 1.0      # Per meter from target_depth_m
     target_depth_m: float = 1.5
     far_weight: float = 1.0        # Per meter farther than far_m from the marker (in the progress measure)
-    far_m: float = 2.5
-    far_cost: float = 0.05         # Per step, per meter farther than far_m. The progress term alone gives back
-                                   # on the way in what it charges on the way out, so it didn't stop swing-outs
+    far_m: float = 2.0             # Was 2.5: with nothing pulling it in below 2.5 m, the sub drifted out to
+                                   # 3-4 m a quarter of the way around (sliding sideways while backing off)
+    ring_cost: float = 0.15        # Per step, per meter off the ring at far_m from the marker, in or out, once
+                                   # the sub has joined the loop (come within far_m + join_margin_m).
+                                   # - Out: the progress term alone gives back on the way in what it charges
+                                   #   on the way out, so it didn't stop swing-outs.
+                                   # - In: the sweep reward pays per degree, and a smaller circle sweeps
+                                   #   degrees faster at the same speed, so without this the policy hugged
+                                   #   the margin (and with the real, slower physics, dipped inside it).
+                                   # - Not on the approach: there it made ending the episode at the margin
+                                   #   (-5) cheaper than flying in.
+    join_margin_m: float = 0.25
     success_bonus: float = 20.0
     collision_penalty: float = 5.0
     margin_cost: float = 0.1       # Per step inside the safety margin...
@@ -99,13 +113,16 @@ class OrbitEnv(SubTaskEnv):
     INCLUDE_MARKER = True
     ACTION_DIM = 4
     MIN_TARGET_DEPTH_M = 1.2   # Same safety limit the mission runner applies: the orbit never needs to be shallower
+    MAX_TARGET_DEPTH_M = 1.65  # At least 0.44 m above the pole feet (floor 2.09 m), so perception can range them.
+                               # Allowed down to 1.9 m, a policy got stuck there (its depth output clipped at
+                               # the limit gives no learning signal) and misjudged the gate by 2-3 m
 
     def __init__(self, detector_mode: str = "perfect", control_period: float = 0.1,
-                 max_seconds: float = 90.0, start: Optional[OrbitStartConfig] = None,
+                 max_seconds: float = 120.0, start: Optional[OrbitStartConfig] = None,
                  reward: Optional[OrbitRewardConfig] = None, margin_rule: str = "soft",
                  practice_starts: bool = False, randomize: bool = False,
                  mission_starts: Optional[list] = None, mission_share: float = 0.4):
-        assert margin_rule in ("soft", "hard"), margin_rule
+        assert margin_rule in ("soft", "hard", "near"), margin_rule
         self.margin_rule = margin_rule
         self.practice_starts = practice_starts
         self.mission_starts, self.mission_share = mission_starts or [], mission_share   # Recorded handoffs (training)
@@ -153,6 +170,7 @@ class OrbitEnv(SubTaskEnv):
         self._loop_steps = self._loop_steps_seen = 0
         self._off_center_sum = 0.0
         self._inside_margin_s, self._closest = 0.0, self._marker_distance()
+        self._joined = False   # Has the sub come in to the loop yet? (The swing-out cost starts then)
 
     def _marker_distance(self) -> float:
         s, m = self.core.state, self.core.marker
@@ -165,7 +183,9 @@ class OrbitEnv(SubTaskEnv):
         """Keeping the marker in view while going around is how the sub stays safe with one forward camera."""
         rc, cost = self.reward_cfg, 0.0
         distance = self._marker_distance()
-        cost += rc.far_cost * max(0.0, distance - rc.far_m)
+        self._joined = self._joined or distance <= rc.far_m + rc.join_margin_m
+        if self._joined:
+            cost += rc.ring_cost * abs(distance - rc.far_m)
         inside = MIN_MARKER_DISTANCE_M - distance
         if inside > 0:
             cost += rc.margin_cost + rc.margin_cost_depth * inside / MIN_MARKER_DISTANCE_M
@@ -194,7 +214,7 @@ class OrbitEnv(SubTaskEnv):
         self._closest = min(self._closest, d)
         if d < MIN_MARKER_DISTANCE_M:
             self._inside_margin_s += self.core.config.physicsDt
-            if self.margin_rule == "hard":
+            if self.margin_rule == "hard" or (self.margin_rule == "near" and d < NEAR_STOP_M):
                 return "too_close"
         if self.new_crossings():
             return "wrong_way"

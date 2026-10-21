@@ -171,10 +171,10 @@ class DynamicOrbitPole(Subtask):
             # ---
 
             # Hold Depth
-            heave_cmd, pitch_cmd = sub.get_depth_pitch_commands(sensors, self.target_depth, 0.0)
+            heave_cmd = sub.get_heave_command(sensors, self.target_depth)
 
             # Mix commands
-            commands = sub._mix_and_normalize_commands(surge_cmd, sway_cmd, yaw_cmd, heave_cmd, pitch_cmd)
+            commands = sub._mix_and_normalize_commands(surge_cmd, sway_cmd, yaw_cmd, heave_cmd)
             return SubtaskStatus.RUNNING, commands
         else:
             # --- Pole is LOST: Local Search or Fail ---
@@ -189,8 +189,8 @@ class DynamicOrbitPole(Subtask):
             self.integral_width_err = 0.0 # Reset integral
             self.last_width_error = 0.0
             # Hold Depth
-            heave_cmd, pitch_cmd = sub.get_depth_pitch_commands(sensors, self.target_depth, 0.0)
-            commands = sub._mix_and_normalize_commands(surge_cmd, sway_cmd, yaw_cmd, heave_cmd, pitch_cmd)
+            heave_cmd = sub.get_heave_command(sensors, self.target_depth)
+            commands = sub._mix_and_normalize_commands(surge_cmd, sway_cmd, yaw_cmd, heave_cmd)
             return SubtaskStatus.RUNNING, commands
 
     def get_dynamic_name(self, context: Dict[str, Any]) -> str:
@@ -394,8 +394,8 @@ class WaitForTargetVisible(Subtask):
             cam_w, _ = sensors.camera_image.get_size()
             pole = max(vision_data.red_blobs, key=lambda b: b['area'])
             yaw = power if pole['center_x'] < cam_w / 2 else -power
-        heave, pitch = sub.get_depth_pitch_commands(sensors, self.target_depth, 0.0)
-        return SubtaskStatus.RUNNING, sub._mix_and_normalize_commands(0, 0, yaw, heave, pitch)
+        heave = sub.get_heave_command(sensors, self.target_depth)
+        return SubtaskStatus.RUNNING, sub._mix_and_normalize_commands(0, 0, yaw, heave)
 
 class AlignToObjectX(Subtask):
     def __init__(self, target_x_fraction: float, tolerance_fraction: float = 0.047, yaw_gain: float = 0.8, yaw_rate_tolerance: float = 0.05):
@@ -414,8 +414,8 @@ class AlignToObjectX(Subtask):
         yaw = np.clip(yaw_p + yaw_d, -1.0, 1.0)
         is_centered = abs(pixel_error_x) < self.tolerance_fraction * cam_w; is_stable = abs(sensors.imu.gyro_z) < self.yaw_rate_tolerance
         if is_centered and is_stable: context['initial_heading'] = sensors.heading; return SubtaskStatus.COMPLETED, sub._get_damping_commands(sensors)
-        heave, pitch = sub.get_depth_pitch_commands(sensors, self.target_depth, 0.0)
-        return SubtaskStatus.RUNNING, sub._mix_and_normalize_commands(0.0, 0.0, yaw, heave, pitch)
+        heave = sub.get_heave_command(sensors, self.target_depth)
+        return SubtaskStatus.RUNNING, sub._mix_and_normalize_commands(0.0, 0.0, yaw, heave)
     def on_exit(self, sub: 'Submarine', sensors: SensorSuite, vision_data: Vision, context: Dict[str, Any]): context['initial_heading'] = sensors.heading
 
 class ApproachAndCenterObject(Subtask):
@@ -437,10 +437,10 @@ class ApproachAndCenterObject(Subtask):
             pixel_error_x = target_center_x - target_pixel_x
             yaw_p = -(pixel_error_x / (cam_w / 2)) * self.yaw_gain; yaw_d = -sensors.imu.gyro_z * sub.YAW_D_GAIN
             yaw = np.clip(yaw_p + yaw_d, -1.0, 1.0)
-            heave, pitch = sub.get_depth_pitch_commands(sensors, self.target_depth, 0.0)
+            heave = sub.get_heave_command(sensors, self.target_depth)
             is_at_dist = abs(height_error) < self.height_tolerance; is_aligned = abs(pixel_error_x) < self.align_tolerance_fraction * cam_w
             if is_at_dist and is_aligned: print("INFO: Approach complete."); context['initial_heading'] = sensors.heading; return SubtaskStatus.COMPLETED, sub._get_damping_commands(sensors)
-            return SubtaskStatus.RUNNING, sub._mix_and_normalize_commands(surge, 0.0, yaw, heave, pitch)
+            return SubtaskStatus.RUNNING, sub._mix_and_normalize_commands(surge, 0.0, yaw, heave)
         else:
             self.time_since_target_lost += dt
             if self.time_since_target_lost > self.lost_timeout: print(f"ERROR: Approach failed - target lost for > {self.lost_timeout}s"); return SubtaskStatus.FAILED, sub.get_spin_damping_commands(sensors, self.target_depth)

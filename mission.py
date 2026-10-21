@@ -24,9 +24,10 @@ trained on the skill's own flights), so the runner only sequences them:
 Each skill gets its own observation builder (the two policies see different
 layouts), reset when the skill takes over, as in training.
 
-Safety limit: the gate and orbit skills never command a depth shallower than
-MIN_DEPTH_M, matching the limit their environments train with (the opening
-is below 1.15 m, and both policies tended to rise and surface otherwise).
+Depth limits: the gate and orbit skills command depths between MIN_DEPTH_M
+and MAX_DEPTH_M, matching the limits their environments train with. The
+opening is below 1.15 m, and both policies tended to rise and surface
+otherwise; below 1.65 m the camera is too close to the pole feet to range them.
 """
 import math
 import random
@@ -37,12 +38,13 @@ import numpy as np
 from observation import ObservationBuilder
 from sub_env import SubTaskEnv
 
-GATE_POLICY = "runs/gate_carry_ft2/final_model.zip"
+GATE_POLICY = "runs/gate_phys6_ft/final_model.zip"
 DIVE_DEPTH_M = 1.5
 DIVE_DONE_M = 1.3           # Dive is done below this...
 DIVE_STEADY_MPS = 0.1       # ...once the depth rate has settled under this
 MIN_DEPTH_M = 1.2
-ORBIT_POLICY = "runs/orbit_confirm_ft/final_model.zip"
+MAX_DEPTH_M = 1.65
+ORBIT_POLICY = "runs/orbit_ring3_ft/final_model.zip"
 
 SWEEP_DEG = 270.0           # Ground truth: what counts as having gone around the marker
 MIN_MARKER_DISTANCE_M = 1.5
@@ -184,7 +186,8 @@ class MissionRunner:
                     self.skill_action, _ = self._skill(env)   # The next skill acts on this step already
         if self.phase in self.NEXT:
             action = np.append(self.skill_action, 0.0) if self.phase != "ORBIT" else self.skill_action.copy()
-            action[1] = max(action[1], self._depth_action(MIN_DEPTH_M))   # Safety limit on depth
+            action[1] = float(np.clip(action[1], self._depth_action(MIN_DEPTH_M),
+                                      self._depth_action(MAX_DEPTH_M)))   # Depth limits, as in training
         else:
             # DIVE: hold the start heading and dive to DIVE_DEPTH_M. DONE: hold position at depth.
             turn = float(np.clip(_wrap(self.dive_heading - r.heading) / 45.0, -1, 1)) if self.phase == "DIVE" else 0.0

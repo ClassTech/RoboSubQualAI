@@ -12,7 +12,9 @@ One frame of the observation (all roughly in [-1, 1]); FRAME_FIELDS names each v
   right pole   Each keeps its identity when only one is in view (close to the
                gate both no longer fit), so the policy knows which way to steer.
   gate         the same five, plus the turn needed to face straight through the
-               gate and the sideways distance from its center line
+               gate and the sideways distance from its center line. A pair counts
+               as the gate once seen GATE_CONFIRM_FRAMES frames in a row; until then
+               its boxes are treated as lone poles
   marker       (optional, for the orbit skill) the green marker pole: the same five.
                A sighting counts once seen MARKER_CONFIRM_FRAMES frames in a row,
                which filters out single false detections
@@ -50,6 +52,8 @@ OFFSET_SCALE = 2.0        # m
 MAX_UNSEEN = 5.0          # s; time since seen is clipped here
 MARKER_CONFIRM_FRAMES = 3 # A marker sighting counts only after this many frames in a row, so a single
                           # false detection can't move the remembered marker (seed 10018 hit the marker)
+GATE_CONFIRM_FRAMES = 3   # Likewise a gate pair: a phantom red box paired with a real pole gave gate
+                          # offsets 2-3 m wrong, and the gate policy steered into the pole
 
 # How much each range method is trusted (perception.Estimate.method)
 RANGE_CONFIDENCE = {"poles": 1.0, "bottom": 1.0, "height": 0.8, "separation": 0.6, "width": 0.3, "none": 0.0}
@@ -179,6 +183,7 @@ class ObservationBuilder:
         self.start_heading = start_heading
         self.left, self.right, self.gate = _Track(), _Track(), _GateTrack()
         self.marker = _Track(confirm_frames=MARKER_CONFIRM_FRAMES)
+        self.pair_streak = 0
         self.frames: deque = deque(maxlen=self.stack)
 
     @property
@@ -210,6 +215,9 @@ class ObservationBuilder:
     def _update_tracks(self, red_boxes: Sequence[dict], depth: float, pitch: float, heading: float, dt: float):
         left_est = right_est = gate_est = geometry = None
         pair = find_gate_pair(list(red_boxes), self.camera.height)
+        self.pair_streak = self.pair_streak + 1 if pair else 0
+        if pair and self.pair_streak < GATE_CONFIRM_FRAMES:
+            pair = None   # Not confirmed yet: the boxes are handled as lone poles below
         if pair:
             left_est = self._estimate_pole(pair[0], depth, pitch)
             right_est = self._estimate_pole(pair[1], depth, pitch)

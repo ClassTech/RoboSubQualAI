@@ -137,7 +137,7 @@ class SimView:
         t = thrusters
         for i, (label, v) in enumerate([("HFL", t.hfl), ("HFR", t.hfr), ("HAL", t.hal), ("HAR", t.har)]):
             self._draw_thruster_bar(tx + i * 40, ty, label, v)
-        for i, (label, v) in enumerate([("VF", t.vf), ("VR", t.vr)]):
+        for i, (label, v) in enumerate([("VL", t.vl), ("VR", t.vr)]):
             self._draw_thruster_bar(tx + 180 + i * 40, ty, label, v)
 
         screen.blit(pygame.transform.scale(self.camera_surface, (400, 300)), (self.width - 420, 20))

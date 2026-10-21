@@ -23,8 +23,9 @@ class ThrusterCommands:
     hal: float = 0.0  # Horizontal Aft-Left
     har: float = 0.0  # Horizontal Aft-Right
 
-    # Vertical Thrusters (front and rear)
-    vf: float = 0.0   # Vertical Front
-    vr: float = 0.0   # Vertical Rear
+    # Vertical Thrusters, one on each side: together they move the sub up and down.
+    # (They can't control pitch; the sub is passively stable in pitch and roll.)
+    vl: float = 0.0   # Vertical Left
+    vr: float = 0.0   # Vertical Right
 
     pause_simulation: bool = False

@@ -50,11 +50,15 @@ def estimate_pole(box: dict, cam: CameraModel, diameter_m: float,
                   camera_depth_m: Optional[float] = None,
                   pitch_deg: float = 0.0,
                   edge_margin_px: int = 1,
-                  min_angle_deg: float = 3.0) -> Estimate:
+                  min_angle_deg: float = 3.0,
+                  min_drop_m: float = 0.4) -> Estimate:
     """
     Bearing and range to a vertical pole. Tries, most accurate first:
     1. bottom: the pole's bottom end is in view and its depth is known (e.g. the
        pool floor), so range follows from the camera depth and the angle down to it.
+       Only when the camera is at least min_drop_m above the bottom end: closer
+       than that, the depth sensor's zero error (up to 2 cm) alone is a large share
+       of the drop, and a sub flying 0.2 m off the floor got gate offsets 2-3 m wrong.
     2. height: both ends are in view and the visible length is known.
     3. width: the pole's diameter. Always available but noisy for thin poles.
     """
@@ -67,7 +71,7 @@ def estimate_pole(box: dict, cam: CameraModel, diameter_m: float,
     if bottom_in_view and bottom_depth_m is not None and camera_depth_m is not None:
         drop = bottom_depth_m - camera_depth_m
         angle = _below_horizon_rad(cam, box['max_y'], pitch_deg)
-        if drop > 0 and angle > math.radians(min_angle_deg):
+        if drop >= min_drop_m and angle > math.radians(min_angle_deg):
             return Estimate(b, drop / math.tan(angle) / cos_b, "bottom")
 
     if bottom_in_view and top_in_view and height_m is not None and box['height'] > 0:

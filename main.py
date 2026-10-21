@@ -27,7 +27,8 @@ def build_mission():
     orbit_task = OrbitTurnTask(target_depth=MISSION_DEPTH,
                                approach_height_fraction=0.75,
                                orbit_target_fraction=0.5,
-                               orbit_sway_power=-0.5,      # Negative = right (positive sway moves the sub left)
+                               orbit_sway_power=-0.8,      # Negative = right (positive sway moves the sub left).
+                                                           # Was -0.5; with the real drag that took most of 90 s
                                orbit_yaw_gain=4.5,
                                orbit_target_width_fraction=0.08, # ~2.7 m from the marker, outside the 1.5 m margin
                                final_sway_power=-0.5,

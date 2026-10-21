@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 STATE_FIELDS = ("x", "y", "z", "heading", "pitch", "velocity_x", "velocity_y", "velocity_z",
                 "angular_velocity_z", "angular_velocity_y")
-THRUST_FIELDS = ("hfl", "hfr", "hal", "har", "vf", "vr")
+THRUST_FIELDS = ("hfl", "hfr", "hal", "har", "vl", "vr")
 
 
 def snapshot(core) -> dict:
