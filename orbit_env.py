@@ -76,7 +76,10 @@ class OrbitStartConfig:
 
 @dataclass
 class OrbitRewardConfig:
-    sweep: float = 2.0             # Per radian swept around the marker, up to SWEEP_DEG
+    sweep: float = 2.0             # Per radian swept around the marker, up to SWEEP_DEG, counted from when the
+                                   # sub joins the loop. Counted from the start, the policy went around while
+                                   # still closing in and reached the ring ~115 deg around (3-4 m out at 90
+                                   # deg). Counted only while near, it hugged the marker
     face_gate: float = 4.0         # For facing the gate, phased in over the second half of the sweep
     depth_weight: float = 1.0      # Per meter from target_depth_m
     target_depth_m: float = 1.5
@@ -170,7 +173,10 @@ class OrbitEnv(SubTaskEnv):
         self._loop_steps = self._loop_steps_seen = 0
         self._off_center_sum = 0.0
         self._inside_margin_s, self._closest = 0.0, self._marker_distance()
-        self._joined = False   # Has the sub come in to the loop yet? (The swing-out cost starts then)
+        # Has the sub come in to the loop yet? The ring cost and the sweep reward start then.
+        # Practice starts begin on the loop, partway around
+        self._joined = bool(self._preset_swept)
+        self.swept_joined = self._preset_swept   # Signed degrees swept since joining (the sweep reward)
 
     def _marker_distance(self) -> float:
         s, m = self.core.state, self.core.marker
@@ -208,7 +214,12 @@ class OrbitEnv(SubTaskEnv):
 
     def _physics_outcome(self) -> Optional[str]:
         angle = self._marker_angle()
-        self.swept += _wrap(angle - self._last_angle)
+        step = _wrap(angle - self._last_angle)
+        self.swept += step
+        rc = self.reward_cfg
+        self._joined = self._joined or self._marker_distance() <= rc.far_m + rc.join_margin_m
+        if self._joined:
+            self.swept_joined += step
         self._last_angle = angle
         d = self._marker_distance()
         self._closest = min(self._closest, d)
@@ -245,7 +256,7 @@ class OrbitEnv(SubTaskEnv):
     def _potential(self) -> float:
         """Sweep around the marker, then face the gate, at mission depth, without drifting far. Ground truth."""
         s, m, g, rc = self.core.state, self.core.marker, self.core.gate, self.reward_cfg
-        sweep = min(abs(self.swept), SWEEP_DEG)
+        sweep = min(abs(self.swept_joined), SWEEP_DEG)
         to_gate = math.degrees(math.atan2(g.center_y - s.y, g.x - s.x))
         facing = 1.0 - abs(_wrap(to_gate - s.heading)) / 180.0          # 1 facing the gate, 0 facing away
         phase_in = float(np.clip((abs(self.swept) - 180.0) / (SWEEP_DEG - 180.0), 0.0, 1.0))

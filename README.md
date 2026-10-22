@@ -21,7 +21,7 @@ On fresh test starts, with the noisy detector:
 | Full mission | Success, nominal | Success, varied dynamics | Typical time |
 |---|---|---|---|
 | Scripted mission | 57/60 | 56/60 | ~151 s |
-| **Learned skills + done detectors** | **59/60** | **58/60** | **~99 s** |
+| **Learned skills + done detectors** | **59/60** | **59/60** | **~97 s** |
 
 The learned mission is a little more reliable than the scripted one and about a third faster, with no hand-written switching rules: each skill's detector decides when to move on.
 
@@ -47,7 +47,7 @@ python3.12 -m venv .venv
 .venv/bin/python watch.py mission --task mission
 .venv/bin/python watch.py scripted --task mission
 .venv/bin/python watch.py runs/gate_phys6_ft/final_model.zip --task gate
-.venv/bin/python watch.py runs/orbit_ring3_ft/final_model.zip --task orbit
+.venv/bin/python watch.py runs/orbit_join_sweep/final_model.zip --task orbit
 
 # Train a skill (--task gate | orbit; --randomize varies the dynamics; --resume fine-tunes)
 .venv/bin/python train.py --name my_gate --task gate --detector noisy --wide-starts --randomize --steps 2000000

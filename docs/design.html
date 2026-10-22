@@ -110,7 +110,7 @@
 </nav>
 
 <h2 id="summary">Summary</h2>
-<p class="lede">Two learned skills fly the RoboSub qualification run in simulation in about 99 s. The scripted mission takes about 150 s. On 180 fresh test starts the learned run succeeds 175 times, the scripted one 171.</p>
+<p class="lede">Two learned skills fly the RoboSub qualification run in simulation in about 97 s. The scripted mission takes about 150 s. On 180 fresh test starts the learned run succeeds 177 times, the scripted one 171.</p>
 <p>The run is: dive, pass through the gate, go around the marker pole, and come back through the gate. A gate policy and an orbit policy each learned their part by reinforcement learning (PPO). Each skill also has a small learned done detector that says when its job is finished, so the runner only puts them in order.</p>
 <p>Five ideas shape the design:</p>
 <ol>
@@ -490,7 +490,7 @@
 <div class="table-wrap"><table>
   <thead><tr><th>Term</th><th class="num">Weight</th><th>What it does</th><th>Why this value</th></tr></thead>
   <tbody>
-    <tr><td>Sweep</td><td class="num">2.0 / rad</td><td>Pays for angle swept around the marker, up to 270°</td><td>The main guide: about 9.4 for a full loop, in either direction. Measured as angle around the marker, so swinging wide gains nothing.</td></tr>
+    <tr><td>Sweep</td><td class="num">2.0 / rad</td><td>Pays for angle swept around the marker, up to 270°, counted from the moment the sub first joins the ring</td><td>The main guide: about 9.4 for a full loop, in either direction. Measured as angle around the marker, so swinging wide gains nothing. Counted from the start, the policy went around while still closing in and reached the ring about 115° around, 3–4 m out at 90°; counted from joining, it drives in first and joins at about 84°. (Counting it only while within 2.5 m also brought it in sooner, but then being close was the only way to earn it, and the policy hugged the marker.)</td></tr>
     <tr><td>Face the gate</td><td class="num">4.0</td><td>Pays for heading toward the gate, phased in from 180° to 270° swept</td><td>The loop's last step: stop facing the marker and turn to the gate. Phased in so it doesn't pull the sub around early. Raised from 2 to 4 with practice starts, when the orbit wasn't learning that step.</td></tr>
     <tr><td>Depth error</td><td class="num">1.0 / m</td><td>Counts distance from 1.5 m deep against progress</td><td>Keeps the loop at the depth the return needs.</td></tr>
     <tr><td>Too far (progress)</td><td class="num">1.0 / m</td><td>Counts distance beyond 2 m from the marker against progress</td><td>Draws the sub in. On its own it didn't stop swing-outs: as a change in score, it paid back on the way in what it charged on the way out.</td></tr>
@@ -538,21 +538,21 @@
 <div class="table-wrap"><table>
   <thead><tr><th></th><th class="num">Nominal</th><th class="num">Varied</th><th class="num">Time (median)</th></tr></thead>
   <tbody>
-    <tr class="hl"><td>Learned skills + done detectors</td><td class="num">59/60 (98%)</td><td class="num">58/60 (97%)</td><td class="num">~99 s</td></tr>
+    <tr class="hl"><td>Learned skills + done detectors</td><td class="num">59/60 (98%)</td><td class="num">59/60 (98%)</td><td class="num">~97 s</td></tr>
     <tr><td>Scripted mission</td><td class="num">57/60 (95%)</td><td class="num">56/60 (93%)</td><td class="num">~151 s</td></tr>
   </tbody>
 </table></div>
-<p>On the 10000+ starts the learned mission scored 58 of 60, the scripted one 58. Missions take longer than on the old physics (about 55 s then) because the real sub is about a third as fast.</p>
+<p>On the 10000+ starts the learned mission scored 59 of 60, the scripted one 58: 177 of 180 against 171 over the three sets. Missions take longer than on the old physics (about 55 s then) because the real sub is about a third as fast.</p>
 <h3>Each skill, 100 test starts</h3>
 <div class="table-wrap"><table>
   <thead><tr><th>Skill</th><th class="num">Nominal</th><th class="num">Varied</th><th class="num">Time (median)</th></tr></thead>
   <tbody>
     <tr><td>Gate, forward (to 1.5 m beyond)</td><td class="num">100%</td><td class="num">100%</td><td class="num">23 s</td></tr>
     <tr><td>Gate, return (to 1.5 m beyond)</td><td class="num">97%</td><td class="num">96%</td><td class="num">35 s</td></tr>
-    <tr><td>Orbit</td><td class="num">98%</td><td class="num">99%</td><td class="num">45 s</td></tr>
+    <tr><td>Orbit</td><td class="num">96%</td><td class="num">99%</td><td class="num">43 s</td></tr>
   </tbody>
 </table></div>
-<p>The mission uses <code>gate_phys6_ft</code> and <code>orbit_ring3_ft</code>, with a done detector beside each, retrained on the real physics from the earlier policies.</p>
+<p>The mission uses <code>gate_phys6_ft</code> and <code>orbit_join_sweep</code>, with a done detector beside each, retrained on the real physics from the earlier policies.</p>
 <h3>How the scores were reached</h3>
 <div class="table-wrap"><table>
   <thead><tr><th>Step</th><th>Effect</th></tr></thead>
@@ -572,6 +572,7 @@
     <tr><td>Marker sightings confirmed over 3 frames; gate search starts</td><td>learned mission 115 → 118 of 120; no more missed gates on the return</td></tr>
     <tr><td>Done detectors replace the runner's rules; gate carries through</td><td>118 → 119 of 120, with no hand-written switching left</td></tr>
     <tr><td>Real physics (measured thrust, frame drag, side vertical thrusters), retrained</td><td>first 152 of 180; then the orbit's ring cost, honest perception near the floor, confirmed gate pairs: 175 of 180 (scripted 171)</td></tr>
+    <tr><td>Orbit's sweep counted from joining the ring</td><td>joins the ring at ~84° instead of ~116°; 177 of 180</td></tr>
   </tbody>
 </table></div>
 
