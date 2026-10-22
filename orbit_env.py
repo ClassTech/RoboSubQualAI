@@ -96,6 +96,9 @@ class OrbitRewardConfig:
                                    # - Not on the approach: there it made ending the episode at the margin
                                    #   (-5) cheaper than flying in.
     join_margin_m: float = 0.25
+    approach_sway_cost: float = 0.03  # Per step at full sway, until the sub joins the loop. Without it the
+                                      # policy kept sliding sideways all the way in (a habit from when going
+                                      # around early was paid), curving the approach and slowing it
     success_bonus: float = 20.0
     collision_penalty: float = 5.0
     margin_cost: float = 0.1       # Per step inside the safety margin...
@@ -192,6 +195,8 @@ class OrbitEnv(SubTaskEnv):
         self._joined = self._joined or distance <= rc.far_m + rc.join_margin_m
         if self._joined:
             cost += rc.ring_cost * abs(distance - rc.far_m)
+        else:
+            cost += rc.approach_sway_cost * abs(float(self.last_action[3]))
         inside = MIN_MARKER_DISTANCE_M - distance
         if inside > 0:
             cost += rc.margin_cost + rc.margin_cost_depth * inside / MIN_MARKER_DISTANCE_M

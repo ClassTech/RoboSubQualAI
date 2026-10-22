@@ -495,6 +495,7 @@
     <tr><td>Depth error</td><td class="num">1.0 / m</td><td>Counts distance from 1.5 m deep against progress</td><td>Keeps the loop at the depth the return needs.</td></tr>
     <tr><td>Too far (progress)</td><td class="num">1.0 / m</td><td>Counts distance beyond 2 m from the marker against progress</td><td>Draws the sub in. On its own it didn't stop swing-outs: as a change in score, it paid back on the way in what it charged on the way out.</td></tr>
     <tr><td>Off the ring (each step)</td><td class="num">−0.15 / m / step</td><td>Charged every step for each meter off a 2 m ring, in or out, once the sub has come within 2.25 m</td><td>A cost per step can't be paid back, so it stops swing-outs. Two-sided because the sweep reward pays per degree, and a smaller circle sweeps degrees faster: without the inner side, policies hugged the margin. Not on the approach: charged from the start (5–9 m out), it made ending the episode at the margin (−5) cheaper than flying in, and 93–98% of training episodes ended that way. Once on the ring the loop holds 1.7–2.0 m.</td></tr>
+    <tr><td>Sliding on the approach</td><td class="num">−0.03 / step</td><td>Charged for sideways thrust (scaled by how much) until the sub joins the ring</td><td>On the way in the policy slid sideways at full sway, curving and slowing its approach. The charge only worked once the policy's sway output, pinned far past its limit, was scaled back into range (see the lesson on clipped outputs).</td></tr>
     <tr><td>Marker off center</td><td class="num">−0.04 / step</td><td>Scaled by how far the marker is from the image center; full when out of view more than 0.5 s</td><td>With one forward camera, keeping the marker in view is how the sub stays safe. Without it the first orbits flew mostly blind (16–30% of the loop in view); with it, about 85–90%. The 0.5 s grace covers normal detector dropouts.</td></tr>
     <tr><td>Inside the margin</td><td class="num">−0.1 / step, plus up to −0.5</td><td>Charged each step closer than 1.5 m, more the deeper inside</td><td>The real-world rule, used in scoring: getting close is bad but recoverable, and only contact fails.</td></tr>
     <tr><td>Too close (training)</td><td class="num">−5</td><td>Ends the episode within 1.0 m (<code>--margin-rule near</code>)</td><td>From scratch, under only the per-step margin cost, policies never learned to go around and stuck near the marker, so training needs a hard stop somewhere. At 1.5 m (the old "hard" rule), exploration on the real physics crossed it in almost every episode; at 1.0 m, the margin cost does the teaching and the stop only catches real blunders.</td></tr>
@@ -552,7 +553,7 @@
     <tr><td>Orbit</td><td class="num">96%</td><td class="num">99%</td><td class="num">43 s</td></tr>
   </tbody>
 </table></div>
-<p>The mission uses <code>gate_phys6_ft</code> and <code>orbit_join_sweep</code>, with a done detector beside each, retrained on the real physics from the earlier policies.</p>
+<p>The mission uses <code>gate_phys6_ft</code> and <code>orbit_straight_in2</code>, with a done detector beside each, retrained on the real physics from the earlier policies.</p>
 <h3>How the scores were reached</h3>
 <div class="table-wrap"><table>
   <thead><tr><th>Step</th><th>Effect</th></tr></thead>
@@ -573,6 +574,7 @@
     <tr><td>Done detectors replace the runner's rules; gate carries through</td><td>118 → 119 of 120, with no hand-written switching left</td></tr>
     <tr><td>Real physics (measured thrust, frame drag, side vertical thrusters), retrained</td><td>first 152 of 180; then the orbit's ring cost, honest perception near the floor, confirmed gate pairs: 175 of 180 (scripted 171)</td></tr>
     <tr><td>Orbit's sweep counted from joining the ring</td><td>joins the ring at ~84° instead of ~116°; 177 of 180</td></tr>
+    <tr><td>Orbit's pinned sideways output rescaled; approach charge</td><td>joins at ~77°; 2.4 m at 60–90°; 177 of 180</td></tr>
   </tbody>
 </table></div>
 
@@ -593,6 +595,7 @@
 <p><strong>Judge a component where it's used.</strong> The orbit detector's offline scores favored cautious settings that failed in the mission, because offline every early firing counted as an error while in the mission most were harmless.</p>
 <p><strong>Check the physics against the real sub.</strong> Thrust 4.4× too low and a streamlined hull's drag made a sub that coasted. Policies learned to fight the coasting, and on the real numbers the same habits drove them into the marker. A photo and one measurement fixed more than many training runs.</p>
 <p><strong>When a new physics breaks things, look for the loophole.</strong> On the real physics, three reward and perception flaws surfaced that the old numbers had hidden: a cost that made crashing the cheapest ending, a reward that paid for hugging the marker, and phantom gate pairs. Each showed up as "the policy is bad" and each was found by tracing what the policy saw and what it was paid for.</p>
+<p><strong>Watch for outputs pinned past their limits.</strong> The policy's actions are clipped to ±1. When an output's typical value drifts far beyond that (the gate's depth, the orbit's sideways thrust at about 2.2), every try clips to the same action, training sees no difference to learn from, and no reward change can move it. It looks like stubbornness; reading the raw outputs shows it at once. The fix is to bring the output back in range (or cap the action so the pinned value is harmless) and train again.</p>
 <p><strong>Fix it in learning, not in the runner.</strong> Every rule added to the runner makes the learned mission more like the scripted one. When a skill misbehaves, the first choice is to change what it trains on (search starts, recorded handoffs) or what it perceives (confirmed marker sightings), not to add a special case.</p>
 </div>
 

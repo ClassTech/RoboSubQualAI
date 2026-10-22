@@ -47,7 +47,7 @@ python3.12 -m venv .venv
 .venv/bin/python watch.py mission --task mission
 .venv/bin/python watch.py scripted --task mission
 .venv/bin/python watch.py runs/gate_phys6_ft/final_model.zip --task gate
-.venv/bin/python watch.py runs/orbit_join_sweep/final_model.zip --task orbit
+.venv/bin/python watch.py runs/orbit_straight_in2/final_model.zip --task orbit
 
 # Train a skill (--task gate | orbit; --randomize varies the dynamics; --resume fine-tunes)
 .venv/bin/python train.py --name my_gate --task gate --detector noisy --wide-starts --randomize --steps 2000000

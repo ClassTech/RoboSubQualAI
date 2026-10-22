@@ -44,7 +44,7 @@ DIVE_DONE_M = 1.3           # Dive is done below this...
 DIVE_STEADY_MPS = 0.1       # ...once the depth rate has settled under this
 MIN_DEPTH_M = 1.2
 MAX_DEPTH_M = 1.65
-ORBIT_POLICY = "runs/orbit_join_sweep/final_model.zip"
+ORBIT_POLICY = "runs/orbit_straight_in2/final_model.zip"
 
 SWEEP_DEG = 270.0           # Ground truth: what counts as having gone around the marker
 MIN_MARKER_DISTANCE_M = 1.5
