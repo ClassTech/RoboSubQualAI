@@ -149,6 +149,7 @@ The display stays optional: training runs without a window, and the same physics
   - Perception: the foot-angle range needs the camera 0.4 m above the pole feet (at 0.2 m the depth sensor's zero error alone wrecked gate offsets), gate and orbit depth targets capped at 1.65 m, and a gate pair counts only after 3 frames in a row (a phantom red box paired with a real pole gave offsets 2-3 m wrong: the hidden cause of the gate's pole collisions).
   - **Gate `gate_phys6_ft`: forward 100/100 (nominal and varied), return 97/96. Orbit `orbit_ring3_ft`: 98/99, ~45 s, holds 1.7-2.0 m once on the ring. Mission: 59/60, 58/60 varied, 58/60 on 10000+ (175/180), ~99 s; scripted 57, 56, 58 (171/180), ~151 s.**
   - Fine-tuning both from handoffs recorded on the new physics (`runs/handoffs_v3.json`; `gate_phys7_ft`, `orbit_ring4_ft`) scored 174/180: no gain, so the mission keeps `gate_phys6_ft` and `orbit_ring3_ft`.
+- [ ] The orbit reaches its 2 m ring late: it starts ~8.8 m out and curves around while closing in, joining the ring ~116 deg around (3.0-3.1 m median, up to 4.2 m, at 60-90 deg; the user sees this as swinging wide at 90 deg). Tried counting the sweep reward only within 2.5 m: it joined earlier (~82-100 deg) but hugged the marker (orbit 88-92%, 8-11% collisions, against 98-99%). Not adopted.
 
 ## Phase 6: Export to the Pi 5 (deferred)
 - [ ] Export the weights plus the `VecNormalize` statistics, and write a plain-numpy forward pass.
