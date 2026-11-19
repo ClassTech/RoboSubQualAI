@@ -78,3 +78,7 @@ python3.12 -m venv .venv
 ## History
 
 This repository was split from `QualSimSub` (kept as is), which is based on [ClassTech/RoboSim](https://github.com/ClassTech/RoboSim). The scripted task framework, the rendering and the original physics come from there.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
